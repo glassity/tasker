@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 
 require_relative '../lib/google_tasks_client'
+require_relative '../lib/interactive_mode'
 require 'thor'
 
 class TaskerCLI < Thor
@@ -28,6 +29,24 @@ class TaskerCLI < Thor
     client.logout
   rescue => e
     puts "Logout failed: #{e.message}"
+  end
+
+  desc 'interactive', 'Start interactive mode'
+  option :demo, type: :boolean, default: false, desc: 'Run in demo mode (for testing without TTY)'
+  def interactive
+    begin
+      interactive_mode = InteractiveMode.new(client)
+      if options[:demo]
+        interactive_mode.demo
+      else
+        interactive_mode.start
+      end
+    rescue => e
+      puts "Interactive mode failed: #{e.message}"
+      puts "Please ensure you're running this in a proper terminal."
+      puts "Use --demo flag to see a demonstration."
+      puts e.backtrace.first(3) if ENV['DEBUG']
+    end
   end
 
   desc 'lists', 'Show all task lists'

@@ -74,6 +74,9 @@ All commands support the `--credentials` option to specify a custom OAuth creden
 # Limit number of tasks shown
 ./bin/tasker tasks LIST_ID --limit 20
 
+# Start interactive mode for easier task management
+./bin/tasker interactive
+
 # Create a new task
 ./bin/tasker create-task LIST_ID "Buy groceries"
 
@@ -91,6 +94,56 @@ All commands support the `--credentials` option to specify a custom OAuth creden
 
 # Delete a task list
 ./bin/tasker delete-list LIST_ID
+```
+
+### Interactive Mode
+
+The interactive mode provides a more efficient way to manage tasks by maintaining context:
+
+```bash
+./bin/tasker interactive
+```
+
+**Interactive Commands:**
+- `help` - Show available commands
+- `lists` - List all task lists  
+- `use <list_name_or_number>` - Switch to a specific list context
+- `exit-list` - Exit current list context
+- `exit` or `quit` - Exit interactive mode
+
+**List Context Commands (when inside a list):**
+- `tasks [--completed]` - Show tasks in current list
+- `create <title>` - Create a new task
+- `complete <task_id_or_number>` - Mark task as completed
+- `delete <task_id_or_number>` - Delete a task
+
+**Example Interactive Session:**
+```
+> lists
+Available task lists:
+  1. ⭐️ CEO - Jose
+  2. Readings
+  3. Backlog
+
+> use 1
+Switched to list context: ⭐️ CEO - Jose
+
+[⭐️ CEO - Jose] > tasks
+Tasks in ⭐️ CEO - Jose: (73 total)
+  1. ○ Check if julia fixed invoices
+  2. ○ RevTech Labs Capital Standard Term Sheet
+
+[⭐️ CEO - Jose] > create "Review quarterly report"
+Created task: Review quarterly report
+
+[⭐️ CEO - Jose] > complete 1
+Completed task: Check if julia fixed invoices
+
+[⭐️ CEO - Jose] > exit-list
+Exited list context: ⭐️ CEO - Jose
+
+> exit
+Goodbye!
 ```
 
 ### Ruby API
@@ -133,6 +186,7 @@ client.delete_task(list_id, task_id)
 - Persistent token storage - login once, use forever
 - Automatic token refresh when expired
 - **Automatic pagination - handles hundreds/thousands of tasks seamlessly**
+- **Interactive mode with context switching for efficient task management**
 - Command-line interface with Thor
 - Error handling and validation
 - Support for task notes and due dates
