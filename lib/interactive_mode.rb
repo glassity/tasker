@@ -50,7 +50,8 @@ class InteractiveMode
       "help",
       "lists", 
       "use 1",
-      "tasks",
+      "tasks --limit 3",
+      "show 2",
       "create \"Demo task for testing\"",
       "help",
       "exit-list",
@@ -115,6 +116,12 @@ class InteractiveMode
       else
         puts "Error: No list context set. Use 'use <list_name>' first."
       end
+    when 'show'
+      if @current_context == :list
+        show_task_in_current_list(args)
+      else
+        puts "Error: No list context set. Use 'use <list_name>' first."
+      end
     else
       puts "Unknown command: #{command}. Type 'help' for available commands."
     end
@@ -135,16 +142,18 @@ class InteractiveMode
     
     if @current_context == :list
       puts "List context commands (current list: #{@current_list[:title]}):"
-      puts "  tasks [--completed]    - Show tasks in current list"
+      puts "  tasks [--completed] [--limit N] - Show tasks in current list"
       puts "  create <title>         - Create a new task"
       puts "  complete <task_id>     - Mark a task as completed"
       puts "  delete <task_id>       - Delete a task"
+      puts "  show <task_id>         - Show full task details"
     else
       puts "List context commands (available when in a list context):"
-      puts "  tasks [--completed]    - Show tasks in current list"
+      puts "  tasks [--completed] [--limit N] - Show tasks in current list"
       puts "  create <title>         - Create a new task"
       puts "  complete <task_id>     - Mark a task as completed"
       puts "  delete <task_id>       - Delete a task"
+      puts "  show <task_id>         - Show full task details"
     end
     puts
   end
@@ -215,8 +224,18 @@ class InteractiveMode
   def list_tasks_in_current_list(args)
     show_completed = args&.include?('--completed') || false
     
+    # Parse limit if provided
+    limit = nil
+    if args&.include?('--limit')
+      parts = args.split
+      limit_index = parts.index('--limit')
+      if limit_index && limit_index + 1 < parts.length
+        limit = parts[limit_index + 1].to_i
+      end
+    end
+    
     puts "Tasks in #{@current_list[:title]}:"
-    tasks = @client.list_tasks(@current_list[:id], show_completed: show_completed)
+    tasks = @client.list_tasks(@current_list[:id], show_completed: show_completed, max_results: limit)
     
     if tasks.empty?
       puts "No tasks found."
@@ -225,12 +244,7 @@ class InteractiveMode
 
     puts "(#{tasks.length} total)"
     tasks.each_with_index do |task, index|
-      status_icon = task.status == 'completed' ? '✓' : '○'
-      puts "  #{index + 1}. #{status_icon} #{task.title}"
-      puts "     ID: #{task.id}"
-      puts "     Notes: #{task.notes}" if task.notes && !task.notes.empty?
-      puts "     Due: #{task.due}" if task.due
-      puts
+      display_task_summary(task, index + 1)
     end
   end
 
@@ -265,6 +279,51 @@ class InteractiveMode
       puts "Deleted task: #{task_id}"
     else
       puts "Task deletion cancelled."
+    end
+  end
+
+  def show_task_in_current_list(args)
+    return puts "Usage: show <task_id_or_number>" if args.nil? || args.empty?
+
+    task_id = resolve_task_id(args)
+    return unless task_id
+
+    task = @client.get_task(@current_list[:id], task_id)
+    display_task_full(task, @current_list)
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
+  def display_task_summary(task, number)
+    status_icon = task.status == 'completed' ? '✓' : '○'
+    
+    # Truncate title if longer than 75 characters
+    title = task.title.length > 75 ? "#{task.title[0..74]}... +More" : task.title
+    
+    puts "  #{number}. #{status_icon} #{title}"
+    
+    # Show notes in brackets format, truncated
+    if task.notes && !task.notes.empty?
+      notes = task.notes.length > 75 ? "#{task.notes[0..74]}... +More" : task.notes
+      puts "     [#{notes}]"
+    end
+    
+    # Show due date if present
+    puts "     Due: #{task.due}" if task.due
+    puts
+  end
+
+  def display_task_full(task, list = nil)
+    status_icon = task.status == 'completed' ? '✓' : '○'
+    
+    puts "#{status_icon} #{task.title}"
+    puts "List: #{list[:title]}" if list
+    puts "Status: #{task.status}"
+    puts "Due: #{task.due}" if task.due
+    puts
+    if task.notes && !task.notes.empty?
+      puts "Notes:"
+      puts task.notes
     end
   end
 

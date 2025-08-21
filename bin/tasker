@@ -90,12 +90,35 @@ class TaskerCLI < Thor
       puts 'No tasks found.'
     else
       puts "Tasks (#{tasks.length} total):"
-      tasks.each do |task|
-        status_icon = task.status == 'completed' ? '✓' : '○'
-        puts "  #{status_icon} #{task.id}: #{task.title}"
-        puts "    Notes: #{task.notes}" if task.notes && !task.notes.empty?
-        puts "    Due: #{task.due}" if task.due
+      tasks.each_with_index do |task, index|
+        display_task_summary(task, index + 1)
       end
+    end
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
+  desc 'show TASK_ID', 'Show full task details'
+  def show(task_id)
+    # We need list context for this, so let's find the task across all lists
+    task_lists = client.list_task_lists
+    found_task = nil
+    found_list = nil
+    
+    task_lists.each do |list|
+      tasks = client.list_tasks(list.id, show_completed: true)
+      task = tasks.find { |t| t.id == task_id }
+      if task
+        found_task = task
+        found_list = list
+        break
+      end
+    end
+    
+    if found_task
+      display_task_full(found_task, found_list)
+    else
+      puts "Task not found: #{task_id}"
     end
   rescue => e
     puts "Error: #{e.message}"
@@ -147,6 +170,40 @@ class TaskerCLI < Thor
 
   def client
     @client ||= GoogleTasksClient.new(options[:credentials])
+  end
+
+  def display_task_summary(task, number)
+    status_icon = task.status == 'completed' ? '✓' : '○'
+    
+    # Truncate title if longer than 75 characters
+    title = task.title.length > 75 ? "#{task.title[0..74]}... +More" : task.title
+    
+    puts "  #{number}. #{status_icon} #{title}"
+    
+    # Show notes in brackets format, truncated
+    if task.notes && !task.notes.empty?
+      notes = task.notes.length > 75 ? "#{task.notes[0..74]}... +More" : task.notes
+      puts "     [#{notes}]"
+    end
+    
+    # Show due date if present
+    puts "     Due: #{task.due}" if task.due
+    puts
+  end
+
+  def display_task_full(task, list = nil)
+    status_icon = task.status == 'completed' ? '✓' : '○'
+    
+    puts "#{status_icon} #{task.title}"
+    puts "ID: #{task.id}"
+    puts "List: #{list.title}" if list
+    puts "Status: #{task.status}"
+    puts "Due: #{task.due}" if task.due
+    puts
+    if task.notes && !task.notes.empty?
+      puts "Notes:"
+      puts task.notes
+    end
   end
 end
 
