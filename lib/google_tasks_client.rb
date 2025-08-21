@@ -267,10 +267,34 @@ class GoogleTasksClient
 
   public
 
-  def list_task_lists
+  def list_task_lists(max_results: nil)
     ensure_authenticated
     handle_api_error do
-      @service.list_tasklists.items || []
+      all_lists = []
+      next_page_token = nil
+      
+      loop do
+        response = @service.list_tasklists(
+          max_results: max_results || 100,  # Default page size
+          page_token: next_page_token
+        )
+        
+        # Add task lists from this page
+        lists = response.items || []
+        all_lists.concat(lists)
+        
+        # Check if there are more pages
+        next_page_token = response.next_page_token
+        break if next_page_token.nil? || next_page_token.empty?
+        
+        # If max_results was specified and we have enough, stop
+        if max_results && all_lists.length >= max_results
+          all_lists = all_lists.first(max_results)
+          break
+        end
+      end
+      
+      all_lists
     end
   end
 
@@ -296,10 +320,36 @@ class GoogleTasksClient
     end
   end
 
-  def list_tasks(list_id, show_completed: false)
+  def list_tasks(list_id, show_completed: false, max_results: nil)
     ensure_authenticated
     handle_api_error do
-      @service.list_tasks(list_id, show_completed: show_completed).items || []
+      all_tasks = []
+      next_page_token = nil
+      
+      loop do
+        response = @service.list_tasks(
+          list_id,
+          show_completed: show_completed,
+          max_results: max_results || 100,  # Default page size
+          page_token: next_page_token
+        )
+        
+        # Add tasks from this page
+        tasks = response.items || []
+        all_tasks.concat(tasks)
+        
+        # Check if there are more pages
+        next_page_token = response.next_page_token
+        break if next_page_token.nil? || next_page_token.empty?
+        
+        # If max_results was specified and we have enough, stop
+        if max_results && all_tasks.length >= max_results
+          all_tasks = all_tasks.first(max_results)
+          break
+        end
+      end
+      
+      all_tasks
     end
   end
 

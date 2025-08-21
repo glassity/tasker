@@ -31,12 +31,13 @@ class TaskerCLI < Thor
   end
 
   desc 'lists', 'Show all task lists'
+  option :limit, type: :numeric, desc: 'Maximum number of lists to show'
   def lists
-    task_lists = client.list_task_lists
+    task_lists = client.list_task_lists(max_results: options[:limit])
     if task_lists.empty?
       puts 'No task lists found.'
     else
-      puts 'Task Lists:'
+      puts "Task Lists (#{task_lists.length} total):"
       task_lists.each do |list|
         puts "  #{list.id}: #{list.title}"
       end
@@ -63,16 +64,17 @@ class TaskerCLI < Thor
 
   desc 'tasks LIST_ID', 'Show tasks in a list'
   option :completed, type: :boolean, default: false, desc: 'Show completed tasks'
+  option :limit, type: :numeric, desc: 'Maximum number of tasks to show'
   def tasks(list_id)
-    tasks = client.list_tasks(list_id, show_completed: options[:completed])
+    tasks = client.list_tasks(list_id, show_completed: options[:completed], max_results: options[:limit])
     if tasks.empty?
       puts 'No tasks found.'
     else
-      puts 'Tasks:'
+      puts "Tasks (#{tasks.length} total):"
       tasks.each do |task|
         status_icon = task.status == 'completed' ? '✓' : '○'
         puts "  #{status_icon} #{task.id}: #{task.title}"
-        puts "    Notes: #{task.notes}" if task.notes
+        puts "    Notes: #{task.notes}" if task.notes && !task.notes.empty?
         puts "    Due: #{task.due}" if task.due
       end
     end

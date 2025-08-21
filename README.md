@@ -56,17 +56,23 @@ All commands support the `--credentials` option to specify a custom OAuth creden
 # All subsequent commands use stored tokens automatically
 ./bin/tasker lists
 
+# Show only first 5 task lists
+./bin/tasker lists --limit 5
+
 # Use custom credentials file
 ./bin/tasker lists --credentials /path/to/my_credentials.json
 
 # Create a new task list
 ./bin/tasker create-list "My Tasks"
 
-# Show tasks in a list (replace LIST_ID with actual ID)
+# Show tasks in a list (replace LIST_ID with actual ID) - shows ALL tasks automatically
 ./bin/tasker tasks LIST_ID
 
 # Show completed tasks too
 ./bin/tasker tasks LIST_ID --completed
+
+# Limit number of tasks shown
+./bin/tasker tasks LIST_ID --limit 20
 
 # Create a new task
 ./bin/tasker create-task LIST_ID "Buy groceries"
@@ -126,11 +132,13 @@ client.delete_task(list_id, task_id)
 - OAuth 2.0 authentication with automatic browser launch
 - Persistent token storage - login once, use forever
 - Automatic token refresh when expired
+- **Automatic pagination - handles hundreds/thousands of tasks seamlessly**
 - Command-line interface with Thor
 - Error handling and validation
 - Support for task notes and due dates
 - Mark tasks as completed
 - Logout command to clear stored tokens
+- Optional result limiting for large lists
 
 ## Files Created
 
