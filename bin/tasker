@@ -1,0 +1,132 @@
+#!/usr/bin/env ruby
+
+require_relative '../lib/google_tasks_client'
+require 'thor'
+
+class TaskerCLI < Thor
+  class_option :credentials, type: :string, default: 'oauth_credentials.json', 
+               desc: 'Path to OAuth credentials file'
+
+  def initialize(*args)
+    super
+    @client = nil
+  end
+
+  desc 'login', 'Authenticate with Google OAuth'
+  def login
+    puts "Initiating OAuth login..."
+    # Create client with force reauth to show login process
+    @client = GoogleTasksClient.new(options[:credentials])
+    @client.send(:authenticate, true)  # Force reauth to show the process
+    puts "Successfully authenticated! You can now use other commands."
+  rescue => e
+    puts "Login failed: #{e.message}"
+  end
+
+  desc 'logout', 'Clear stored authentication tokens'
+  def logout
+    client.logout
+  rescue => e
+    puts "Logout failed: #{e.message}"
+  end
+
+  desc 'lists', 'Show all task lists'
+  def lists
+    task_lists = client.list_task_lists
+    if task_lists.empty?
+      puts 'No task lists found.'
+    else
+      puts 'Task Lists:'
+      task_lists.each do |list|
+        puts "  #{list.id}: #{list.title}"
+      end
+    end
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
+  desc 'create-list TITLE', 'Create a new task list'
+  def create_list(title)
+    list = client.create_task_list(title)
+    puts "Created task list: #{list.title} (ID: #{list.id})"
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
+  desc 'delete-list LIST_ID', 'Delete a task list'
+  def delete_list(list_id)
+    client.delete_task_list(list_id)
+    puts "Deleted task list: #{list_id}"
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
+  desc 'tasks LIST_ID', 'Show tasks in a list'
+  option :completed, type: :boolean, default: false, desc: 'Show completed tasks'
+  def tasks(list_id)
+    tasks = client.list_tasks(list_id, show_completed: options[:completed])
+    if tasks.empty?
+      puts 'No tasks found.'
+    else
+      puts 'Tasks:'
+      tasks.each do |task|
+        status_icon = task.status == 'completed' ? '✓' : '○'
+        puts "  #{status_icon} #{task.id}: #{task.title}"
+        puts "    Notes: #{task.notes}" if task.notes
+        puts "    Due: #{task.due}" if task.due
+      end
+    end
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
+  desc 'create-task LIST_ID TITLE', 'Create a new task'
+  option :notes, type: :string, desc: 'Task notes'
+  option :due, type: :string, desc: 'Due date (YYYY-MM-DD)'
+  def create_task(list_id, title)
+    due_date = options[:due] ? "#{options[:due]}T00:00:00.000Z" : nil
+    task = client.create_task(list_id, title, notes: options[:notes], due: due_date)
+    puts "Created task: #{task.title} (ID: #{task.id})"
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
+  desc 'complete-task LIST_ID TASK_ID', 'Mark a task as completed'
+  def complete_task(list_id, task_id)
+    client.complete_task(list_id, task_id)
+    puts "Completed task: #{task_id}"
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
+  desc 'delete-task LIST_ID TASK_ID', 'Delete a task'
+  def delete_task(list_id, task_id)
+    client.delete_task(list_id, task_id)
+    puts "Deleted task: #{task_id}"
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
+  desc 'update-task LIST_ID TASK_ID', 'Update a task'
+  option :title, type: :string, desc: 'New title'
+  option :notes, type: :string, desc: 'New notes'
+  option :due, type: :string, desc: 'New due date (YYYY-MM-DD)'
+  def update_task(list_id, task_id)
+    due_date = options[:due] ? "#{options[:due]}T00:00:00.000Z" : nil
+    client.update_task(list_id, task_id, 
+                       title: options[:title], 
+                       notes: options[:notes], 
+                       due: due_date)
+    puts "Updated task: #{task_id}"
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
+  private
+
+  def client
+    @client ||= GoogleTasksClient.new(options[:credentials])
+  end
+end
+
+TaskerCLI.start(ARGV)

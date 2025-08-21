@@ -1,0 +1,359 @@
+require 'google/apis/tasks_v1'
+require 'googleauth'
+require 'googleauth/stores/file_token_store'
+require 'googleauth/user_authorizer'
+require 'fileutils'
+require 'launchy'
+require 'webrick'
+require 'uri'
+
+class GoogleTasksClient
+  SCOPE = ['https://www.googleapis.com/auth/tasks'].freeze
+  CREDENTIALS_PATH = 'oauth_credentials.json'.freeze
+  TOKEN_PATH = 'token.yaml'.freeze
+
+  def initialize(credentials_path = CREDENTIALS_PATH)
+    @service = Google::Apis::TasksV1::TasksService.new
+    @credentials_path = credentials_path
+    @authenticated = false
+  end
+
+  private
+
+  def ensure_authenticated
+    return if @authenticated
+    authenticate
+    @authenticated = true
+  end
+
+  def authenticate(force_reauth = false)
+    unless File.exist?(@credentials_path)
+      raise "OAuth credentials file not found: #{@credentials_path}\n\nTo set up OAuth credentials:\n1. Go to https://console.cloud.google.com/\n2. Create a project and enable Google Tasks API\n3. Go to Credentials → Create Credentials → OAuth client ID\n4. Choose 'Desktop application'\n5. Download the JSON file and save it as '#{@credentials_path}'"
+    end
+
+    client_id = Google::Auth::ClientId.from_file(@credentials_path)
+    token_store = Google::Auth::Stores::FileTokenStore.new(file: TOKEN_PATH)
+    
+    # Configure authorizer for offline access to get refresh tokens
+    authorizer = Google::Auth::UserAuthorizer.new(client_id, SCOPE, token_store)
+
+    user_id = 'default'
+    
+    # Clear stored credentials if force reauth is requested
+    if force_reauth && File.exist?(TOKEN_PATH)
+      File.delete(TOKEN_PATH)
+      puts "Cleared stored credentials. Starting fresh authentication..."
+    end
+    
+    credentials = authorizer.get_credentials(user_id)
+    
+    # Debug token information
+    if force_reauth
+      puts "=== Debug Token Information ==="
+      puts "Token file exists: #{File.exist?(TOKEN_PATH)}"
+      if File.exist?(TOKEN_PATH)
+        puts "Token file size: #{File.size(TOKEN_PATH)} bytes"
+      end
+      puts "Credentials found: #{!credentials.nil?}"
+      if credentials
+        puts "Access token present: #{!credentials.access_token.nil?}"
+        puts "Refresh token present: #{!credentials.refresh_token.nil?}"
+        puts "Token expired: #{credentials.expired?}"
+      end
+      puts "=== End Debug ==="
+    end
+    
+    # Check if we have valid credentials
+    if credentials.nil?
+      puts "No stored credentials found. Starting OAuth flow..."
+      credentials = perform_oauth_flow(authorizer, user_id)
+    elsif credentials.expired?
+      puts "Access token expired. Refreshing..." if force_reauth
+      begin
+        credentials.refresh!
+        # Store the refreshed tokens
+        token_store.store(user_id, credentials)
+        puts "Successfully refreshed access token." if force_reauth
+      rescue => e
+        puts "Token refresh failed: #{e.message}. Starting new OAuth flow..." if force_reauth
+        File.delete(TOKEN_PATH) if File.exist?(TOKEN_PATH)
+        credentials = perform_oauth_flow(authorizer, user_id)
+      end
+    else
+      puts "Using stored credentials..." if force_reauth
+    end
+
+    @service.authorization = credentials
+  rescue Errno::ENOENT => e
+    raise "OAuth credentials file not found: #{@credentials_path}\n\nTo set up OAuth credentials:\n1. Go to https://console.cloud.google.com/\n2. Create a project and enable Google Tasks API\n3. Go to Credentials → Create Credentials → OAuth client ID\n4. Choose 'Desktop application'\n5. Download the JSON file and save it as '#{@credentials_path}'"
+  rescue JSON::ParserError => e
+    raise "Invalid OAuth credentials file format: #{@credentials_path}. Please download a fresh copy from Google Cloud Console."
+  rescue StandardError => e
+    if e.message.include?('invalid_grant') || e.message.include?('invalid_request')
+      File.delete(TOKEN_PATH) if File.exist?(TOKEN_PATH)
+      raise "Stored credentials are invalid. Please run 'tasker login' to re-authenticate."
+    else
+      raise "Authentication failed: #{e.message}"
+    end
+  end
+
+  def perform_oauth_flow(authorizer, user_id)
+    puts "Starting OAuth authentication flow..."
+    
+    # Use localhost redirect with callback server
+    redirect_uri = 'http://localhost:9090/oauth2callback'
+    port = 9090
+    
+    # Set up authorization URL
+    url = authorizer.get_authorization_url(base_url: redirect_uri)
+    
+    puts "\nStarting local server on port #{port} to receive OAuth callback..."
+    puts "Opening your browser for Google OAuth login..."
+    puts "URL: #{url}"
+    
+    # Start local server to handle OAuth callback
+    code = nil
+    error = nil
+    server = nil
+    
+    begin
+      # Create a simple HTTP server to handle the callback
+      server = WEBrick::HTTPServer.new(Port: port, Logger: WEBrick::Log.new('/dev/null'), AccessLog: [])
+      
+      server.mount_proc '/oauth2callback' do |req, res|
+        if req.query['code']
+          code = req.query['code']
+          res.body = '<html><body><h1>Success!</h1><p>Authorization received. You can close this window and return to the terminal.</p></body></html>'
+          res.content_type = 'text/html'
+          res.status = 200
+        elsif req.query['error']
+          error = req.query['error']
+          res.body = '<html><body><h1>Error!</h1><p>Authorization failed: ' + error + '</p></body></html>'
+          res.content_type = 'text/html'
+          res.status = 400
+        else
+          res.body = '<html><body><h1>Error!</h1><p>No authorization code received.</p></body></html>'
+          res.content_type = 'text/html'
+          res.status = 400
+        end
+        
+        # Stop the server after handling the request
+        Thread.new { sleep(1); server.shutdown }
+      end
+      
+      # Start server in a separate thread
+      server_thread = Thread.new { server.start }
+      
+      # Open browser
+      begin
+        Launchy.open(url)
+        puts "Browser opened. Please complete the authorization in your browser."
+      rescue => e
+        puts "Could not open browser automatically: #{e.message}"
+        puts "Please open the URL above in your browser manually."
+      end
+      
+      puts "Waiting for authorization callback..."
+      
+      # Wait for the callback (with timeout)
+      timeout = 300  # 5 minutes
+      start_time = Time.now
+      
+      while code.nil? && error.nil? && (Time.now - start_time) < timeout
+        sleep(1)
+      end
+      
+      if error
+        raise "OAuth authorization failed: #{error}"
+      elsif code.nil?
+        raise "OAuth authorization timed out. Please try again."
+      end
+      
+      puts "Authorization code received successfully!"
+      
+    rescue Errno::EADDRINUSE
+      puts "Port #{port} is already in use. Falling back to manual code entry..."
+      return perform_manual_oauth_flow(authorizer, user_id)
+    rescue => e
+      puts "Server error: #{e.message}. Falling back to manual code entry..."
+      return perform_manual_oauth_flow(authorizer, user_id)
+    ensure
+      server&.shutdown
+    end
+    
+    # Exchange the code for tokens
+    puts "Exchanging authorization code for tokens..."
+    
+    begin
+      credentials = authorizer.get_and_store_credentials_from_code(
+        user_id: user_id, 
+        code: code, 
+        base_url: redirect_uri
+      )
+      
+      puts "Token exchange successful!"
+      puts "Access token present: #{!credentials.access_token.nil?}"
+      puts "Refresh token present: #{!credentials.refresh_token.nil?}"
+      
+      # Verify we got both access and refresh tokens
+      if credentials.refresh_token.nil?
+        puts "\nWarning: No refresh token received!"
+        puts "This usually happens when you've already authorized this app before."
+        puts "To get a refresh token:"
+        puts "1. Go to https://myaccount.google.com/permissions"
+        puts "2. Remove access for this app"
+        puts "3. Try logging in again"
+      else
+        puts "Successfully authenticated with refresh token!"
+      end
+      
+      puts "Tokens saved to #{TOKEN_PATH}"
+      
+      # Manually verify the token was stored
+      if File.exist?(TOKEN_PATH)
+        puts "Verified: Token file created successfully"
+      else
+        puts "Error: Token file was not created!"
+      end
+      
+      credentials
+    rescue => e
+      puts "Token exchange failed: #{e.class} - #{e.message}"
+      raise "Failed to exchange authorization code: #{e.message}"
+    end
+  end
+
+  def perform_manual_oauth_flow(authorizer, user_id)
+    puts "Using manual OAuth flow (out-of-band)..."
+    
+    redirect_uri = 'urn:ietf:wg:oauth:2.0:oob'
+    url = authorizer.get_authorization_url(base_url: redirect_uri)
+    
+    puts "\nOpening your browser for Google OAuth login..."
+    puts "URL: #{url}"
+    puts "\nAfter authorizing, you'll get a code. Paste it below."
+    
+    begin
+      Launchy.open(url)
+    rescue => e
+      puts "Could not open browser automatically."
+      puts "Please copy the URL above and open it manually in your browser."
+    end
+    
+    print "\nEnter the authorization code: "
+    code = gets.chomp.strip
+    
+    if code.empty?
+      raise "No authorization code provided. OAuth login cancelled."
+    end
+    
+    puts "Exchanging authorization code for tokens..."
+    
+    credentials = authorizer.get_and_store_credentials_from_code(
+      user_id: user_id, 
+      code: code, 
+      base_url: redirect_uri
+    )
+    
+    puts "Successfully authenticated!"
+    credentials
+  end
+
+  def handle_api_error
+    yield
+  rescue Google::Apis::Error => e
+    raise "Google API error: #{e.message}"
+  end
+
+  public
+
+  def list_task_lists
+    ensure_authenticated
+    handle_api_error do
+      @service.list_tasklists.items || []
+    end
+  end
+
+  def get_task_list(list_id)
+    ensure_authenticated
+    handle_api_error do
+      @service.get_tasklist(list_id)
+    end
+  end
+
+  def create_task_list(title)
+    ensure_authenticated
+    task_list = Google::Apis::TasksV1::TaskList.new(title: title)
+    handle_api_error do
+      @service.insert_tasklist(task_list)
+    end
+  end
+
+  def delete_task_list(list_id)
+    ensure_authenticated
+    handle_api_error do
+      @service.delete_tasklist(list_id)
+    end
+  end
+
+  def list_tasks(list_id, show_completed: false)
+    ensure_authenticated
+    handle_api_error do
+      @service.list_tasks(list_id, show_completed: show_completed).items || []
+    end
+  end
+
+  def get_task(list_id, task_id)
+    ensure_authenticated
+    handle_api_error do
+      @service.get_task(list_id, task_id)
+    end
+  end
+
+  def create_task(list_id, title, notes: nil, due: nil)
+    ensure_authenticated
+    task = Google::Apis::TasksV1::Task.new(
+      title: title,
+      notes: notes,
+      due: due
+    )
+    handle_api_error do
+      @service.insert_task(list_id, task)
+    end
+  end
+
+  def update_task(list_id, task_id, title: nil, notes: nil, due: nil, status: nil)
+    ensure_authenticated
+    task = Google::Apis::TasksV1::Task.new
+    task.title = title if title
+    task.notes = notes if notes
+    task.due = due if due
+    task.status = status if status
+
+    handle_api_error do
+      @service.update_task(list_id, task_id, task)
+    end
+  end
+
+  def delete_task(list_id, task_id)
+    ensure_authenticated
+    handle_api_error do
+      @service.delete_task(list_id, task_id)
+    end
+  end
+
+  def complete_task(list_id, task_id)
+    ensure_authenticated
+    update_task(list_id, task_id, status: 'completed')
+  end
+
+  def logout
+    if File.exist?(TOKEN_PATH)
+      File.delete(TOKEN_PATH)
+      puts "Logged out successfully. Stored tokens cleared."
+    else
+      puts "No stored tokens found."
+    end
+    @authenticated = false
+  end
+end
