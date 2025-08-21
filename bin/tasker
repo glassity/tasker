@@ -194,7 +194,10 @@ class TaskerCLI < Thor
   def display_task_full(task, list = nil)
     status_icon = task.status == 'completed' ? '✓' : '○'
     
-    puts "#{status_icon} #{task.title}"
+    # Check for email links in title or notes
+    email_icon = has_email_content?(task) ? " 📧" : ""
+    
+    puts "#{status_icon} #{task.title}#{email_icon}"
     puts "ID: #{task.id}"
     puts "List: #{list.title}" if list
     puts "Status: #{task.status}"
@@ -204,6 +207,17 @@ class TaskerCLI < Thor
       puts "Notes:"
       puts task.notes
     end
+  end
+
+  def has_email_content?(task)
+    email_patterns = [
+      /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/,  # Email addresses
+      /mailto:/i,  # mailto links
+      /\bemail\b/i  # The word "email"
+    ]
+    
+    text_to_check = "#{task.title} #{task.notes}"
+    email_patterns.any? { |pattern| text_to_check.match?(pattern) }
   end
 end
 

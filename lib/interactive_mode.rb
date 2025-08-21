@@ -50,9 +50,9 @@ class InteractiveMode
       "help",
       "lists", 
       "use 1",
-      "tasks --limit 3",
+      "list --limit 3",
       "show 2",
-      "create \"Demo task for testing\"",
+      "create \"Demo task with email: test@example.com\"",
       "help",
       "exit-list",
       "exit"
@@ -92,7 +92,7 @@ class InteractiveMode
       use_list(args)
     when 'exit-list', 'exit_list'
       exit_list
-    when 'tasks'
+    when 'tasks', 'list'
       if @current_context == :list
         list_tasks_in_current_list(args)
       else
@@ -142,14 +142,14 @@ class InteractiveMode
     
     if @current_context == :list
       puts "List context commands (current list: #{@current_list[:title]}):"
-      puts "  tasks [--completed] [--limit N] - Show tasks in current list"
+      puts "  tasks, list [--completed] [--limit N] - Show tasks in current list"
       puts "  create <title>         - Create a new task"
       puts "  complete <task_id>     - Mark a task as completed"
       puts "  delete <task_id>       - Delete a task"
       puts "  show <task_id>         - Show full task details"
     else
       puts "List context commands (available when in a list context):"
-      puts "  tasks [--completed] [--limit N] - Show tasks in current list"
+      puts "  tasks, list [--completed] [--limit N] - Show tasks in current list"
       puts "  create <title>         - Create a new task"
       puts "  complete <task_id>     - Mark a task as completed"
       puts "  delete <task_id>       - Delete a task"
@@ -316,7 +316,10 @@ class InteractiveMode
   def display_task_full(task, list = nil)
     status_icon = task.status == 'completed' ? '✓' : '○'
     
-    puts "#{status_icon} #{task.title}"
+    # Check for email links in title or notes
+    email_icon = has_email_content?(task) ? " 📧" : ""
+    
+    puts "#{status_icon} #{task.title}#{email_icon}"
     puts "List: #{list[:title]}" if list
     puts "Status: #{task.status}"
     puts "Due: #{task.due}" if task.due
@@ -325,6 +328,17 @@ class InteractiveMode
       puts "Notes:"
       puts task.notes
     end
+  end
+
+  def has_email_content?(task)
+    email_patterns = [
+      /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/,  # Email addresses
+      /mailto:/i,  # mailto links
+      /\bemail\b/i  # The word "email"
+    ]
+    
+    text_to_check = "#{task.title} #{task.notes}"
+    email_patterns.any? { |pattern| text_to_check.match?(pattern) }
   end
 
   def resolve_task_id(input)
