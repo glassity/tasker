@@ -172,7 +172,144 @@ class InteractiveMode
     end
   end
 
+  def plan_task_in_current_list(args)
+    return puts "Usage: plan <task_id_or_number>" if args.nil? || args.empty?
+
+    task_id = resolve_task_id(args)
+    puts "Resolved task ID: #{task_id}" if ENV['DEBUG']
+    return unless task_id
+
+    begin
+      puts "Fetching task with ID: #{task_id} from list: #{@current_list[:id]}" if ENV['DEBUG']
+      task = @client.get_task(@current_list[:id], task_id)
+      puts "Planning task: #{task.title}"
+      puts
+
+      # Show current due date if exists
+      current_due = nil
+      if task.due
+        begin
+          current_due = Time.parse(task.due)
+          puts "Current due date: #{current_due.strftime('%Y-%m-%d %H:%M')}"
+        rescue
+          puts "Current due date: #{task.due}"
+        end
+      else
+        puts "Current due date: (none)"
+      end
+      puts
+
+      # Show planning options
+      selected_date = select_planning_date
+
+      if selected_date.nil?
+        puts "Planning cancelled."
+        return
+      end
+
+      # Update the task with new due date
+      puts "Setting due date to: #{selected_date ? Time.parse(selected_date).strftime('%Y-%m-%d %H:%M') : '(removed)'}" if ENV['DEBUG']
+      @client.update_task(@current_list[:id], task_id, 
+                         title: task.title,  # Preserve title
+                         notes: task.notes,  # Preserve notes
+                         due: selected_date)
+      
+      if selected_date
+        formatted_date = Time.parse(selected_date).strftime('%A, %B %d, %Y at %H:%M')
+        puts "\nTask scheduled for: #{formatted_date}"
+      else
+        puts "\nDue date removed from task."
+      end
+      
+    rescue => e
+      puts "Error planning task: #{e.message}"
+    end
+  end
+
   private
+
+  def select_planning_date
+    puts "Select when to schedule this task:"
+    puts "  1. Today"
+    puts "  2. Tomorrow"
+    puts "  3. Next Monday"
+    puts "  4. Next Tuesday"
+    puts "  5. Next Wednesday"
+    puts "  6. Next Thursday" 
+    puts "  7. Next Friday"
+    puts "  8. Remove current date"
+    puts "  9. Cancel"
+    puts
+    print "Enter your choice (1-9): "
+
+    unless $stdin.tty?
+      # Demo mode - auto-select option 1 (Today)
+      choice = '1'
+      puts choice
+    else
+      choice = $stdin.gets.chomp.strip
+    end
+
+    case choice
+    when '1'
+      # Today at 9 AM
+      today = Date.today
+      Time.new(today.year, today.month, today.day, 9, 0, 0).utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    when '2'
+      # Tomorrow at 9 AM
+      tomorrow = Date.today + 1
+      Time.new(tomorrow.year, tomorrow.month, tomorrow.day, 9, 0, 0).utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    when '3'
+      # Next Monday at 9 AM
+      next_weekday(1, 9).utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    when '4'
+      # Next Tuesday at 9 AM
+      next_weekday(2, 9).utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    when '5'
+      # Next Wednesday at 9 AM
+      next_weekday(3, 9).utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    when '6'
+      # Next Thursday at 9 AM
+      next_weekday(4, 9).utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    when '7'
+      # Next Friday at 9 AM
+      next_weekday(5, 9).utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    when '8'
+      # Remove date
+      nil
+    when '9'
+      # Cancel
+      return nil
+    else
+      puts "Invalid choice. Please select 1-9."
+      select_planning_date
+    end
+  end
+
+  def next_weekday(target_wday, hour = 9)
+    # target_wday: 1=Monday, 2=Tuesday, ..., 5=Friday
+    today = Date.today
+    current_wday = today.wday # 0=Sunday, 1=Monday, ..., 6=Saturday
+    
+    # Convert Sunday=0 to Sunday=7 for easier calculation
+    current_wday = 7 if current_wday == 0
+    target_wday = 7 if target_wday == 0
+    
+    # Calculate days to add
+    if current_wday < target_wday
+      days_to_add = target_wday - current_wday
+    else
+      days_to_add = 7 - current_wday + target_wday
+    end
+    
+    # If it's the same weekday and it's already past the hour, go to next week
+    if current_wday == target_wday && Time.now.hour >= hour
+      days_to_add = 7
+    end
+    
+    target_date = today + days_to_add
+    Time.new(target_date.year, target_date.month, target_date.day, hour, 0, 0)
+  end
 
   def edit_field(field_name, current_value)
     print "#{field_name} [#{current_value || '(none)'}]: "
@@ -294,6 +431,12 @@ class InteractiveMode
       else
         puts "Error: No list context set. Use 'use <list_name>' first."
       end
+    when 'plan'
+      if @current_context == :list
+        plan_task_in_current_list(args)
+      else
+        puts "Error: No list context set. Use 'use <list_name>' first."
+      end
     else
       puts "Unknown command: #{command}. Type 'help' for available commands."
     end
@@ -321,6 +464,7 @@ class InteractiveMode
       puts "  show <task_id>         - Show full task details"
       puts "  edit <task_id>         - Edit task title, notes, or due date"
       puts "  search <text>          - Search for uncompleted tasks containing text"
+      puts "  plan <task_id>         - Quickly schedule task (today, tomorrow, next week, etc.)"
       puts "  review <task_id>       - Review and classify task with priority/department"
     else
       puts "List context commands (available when in a list context):"
@@ -331,6 +475,7 @@ class InteractiveMode
       puts "  show <task_id>         - Show full task details"
       puts "  edit <task_id>         - Edit task title, notes, or due date"
       puts "  search <text>          - Search for uncompleted tasks containing text"
+      puts "  plan <task_id>         - Quickly schedule task (today, tomorrow, next week, etc.)"
       puts "  review <task_id>       - Review and classify task with priority/department"
     end
     puts
