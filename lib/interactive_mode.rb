@@ -122,6 +122,12 @@ class InteractiveMode
       else
         puts "Error: No list context set. Use 'use <list_name>' first."
       end
+    when 'review'
+      if @current_context == :list
+        review_task_in_current_list(args)
+      else
+        puts "Error: No list context set. Use 'use <list_name>' first."
+      end
     else
       puts "Unknown command: #{command}. Type 'help' for available commands."
     end
@@ -147,6 +153,7 @@ class InteractiveMode
       puts "  complete <task_id>     - Mark a task as completed"
       puts "  delete <task_id>       - Delete a task"
       puts "  show <task_id>         - Show full task details"
+      puts "  review <task_id>       - Review and classify task with priority/department"
     else
       puts "List context commands (available when in a list context):"
       puts "  tasks, list [--completed] [--limit N] - Show tasks in current list"
@@ -154,6 +161,7 @@ class InteractiveMode
       puts "  complete <task_id>     - Mark a task as completed"
       puts "  delete <task_id>       - Delete a task"
       puts "  show <task_id>         - Show full task details"
+      puts "  review <task_id>       - Review and classify task with priority/department"
     end
     puts
   end
@@ -272,7 +280,7 @@ class InteractiveMode
     return unless task_id
 
     print "Are you sure you want to delete this task? (y/N): "
-    confirmation = gets.chomp.downcase
+    confirmation = $stdin.gets.chomp.downcase
     
     if confirmation == 'y' || confirmation == 'yes'
       @client.delete_task(@current_list[:id], task_id)
@@ -292,6 +300,166 @@ class InteractiveMode
     display_task_full(task, @current_list)
   rescue => e
     puts "Error: #{e.message}"
+  end
+
+  def review_task_in_current_list(args)
+    return puts "Usage: review <task_id_or_number>" if args.nil? || args.empty?
+
+    task_id = resolve_task_id(args)
+    puts "Resolved task ID: #{task_id}" if ENV['DEBUG']
+    return unless task_id
+
+    begin
+      puts "Fetching task with ID: #{task_id} from list: #{@current_list[:id]}" if ENV['DEBUG']
+      task = @client.get_task(@current_list[:id], task_id)
+      puts "Reviewing task: #{task.title}"
+      puts "Task ID from object: #{task.id}" if ENV['DEBUG']
+      puts "Current notes: #{task.notes}" if ENV['DEBUG']
+      puts
+
+      # Select priority
+      priority = select_priority
+      return if priority.nil?
+
+      # Select department
+      department = select_department
+      
+      # Update task with new classification
+      update_task_classification(task, priority, department, task_id)
+      
+    rescue => e
+      puts "Error: #{e.message}"
+    end
+  end
+
+  def select_priority
+    puts "Select Priority:"
+    puts "  1. 🔥 Hot - Urgent/critical tasks"
+    puts "  2. 🟢 Must - Important/required tasks"
+    puts "  3. 🟠 Nice - Nice to have/optional tasks"
+    puts "  4. 🔴 NotNow - Deferred/not current priority"
+    puts
+    print "Enter priority number (1-4): "
+    
+    unless $stdin.tty?
+      # Demo mode - auto-select option 2 (Must)
+      choice = '2'
+      puts choice
+    else
+      choice = $stdin.gets.chomp.strip
+    end
+    
+    case choice
+    when '1'
+      '🔥Hot'
+    when '2'
+      '🟢Must'
+    when '3'
+      '🟠nice'
+    when '4'
+      '🔴NotNow'
+    else
+      puts "Invalid choice. Please enter 1-4."
+      return nil
+    end
+  end
+
+  def select_department
+    puts "\nSelect Department:"
+    puts "  1. 🧩 Product - Product development tasks"
+    puts "  2. 📈 Business - Business operations/strategy"
+    puts "  3. 📢 Marketing - Marketing and promotion"
+    puts "  4. 🔒 Security - Security/compliance tasks"
+    puts "  5. 👩‍💼 Others - General/administrative tasks"
+    puts "  6. None - Skip department classification"
+    puts
+    print "Enter department number (1-6): "
+    
+    unless $stdin.tty?
+      # Demo mode - auto-select option 2 (Business)
+      choice = '2'
+      puts choice
+    else
+      choice = $stdin.gets.chomp.strip
+    end
+    
+    case choice
+    when '1'
+      '🧩Product'
+    when '2'
+      '📈Business'
+    when '3'
+      '📢Marketing'
+    when '4'
+      '🔒Security'
+    when '5'
+      '👩‍💼Others'
+    when '6'
+      nil
+    else
+      puts "Invalid choice. Please enter 1-6."
+      unless $stdin.tty?
+        return nil  # In demo mode, don't retry
+      else
+        return select_department  # Retry
+      end
+    end
+  end
+
+  def update_task_classification(task, priority, department, task_id)
+    # Get current notes or empty string
+    current_notes = task.notes || ""
+    
+    # Remove existing priority and department icons from notes
+    clean_notes = remove_existing_classifications(current_notes)
+    
+    # Add new classification
+    classification = priority
+    classification += " #{department}" if department
+    
+    # Combine with existing notes
+    if clean_notes.empty?
+      new_notes = classification
+    else
+      new_notes = "#{classification}\n\n#{clean_notes}"
+    end
+    
+    # Update the task
+    puts "Updating task ID: #{task_id}" if ENV['DEBUG']
+    puts "List ID: #{@current_list[:id]}" if ENV['DEBUG']
+    puts "Preserving title: #{task.title}" if ENV['DEBUG']
+    puts "New notes: #{new_notes}" if ENV['DEBUG']
+    puts "Calling @client.update_task(#{@current_list[:id]}, #{task_id}, title: '#{task.title}', notes: '#{new_notes}')" if ENV['DEBUG']
+    @client.update_task(@current_list[:id], task_id, title: task.title, notes: new_notes)
+    
+    puts "\nTask classification updated:"
+    puts "Priority: #{priority}"
+    puts "Department: #{department || 'None'}"
+    puts "Task updated successfully!"
+  end
+
+  def remove_existing_classifications(notes)
+    # Remove existing priority and department icons
+    classification_patterns = [
+      /🔥Hot\s*/,
+      /🟢Must\s*/,
+      /🟠nice\s*/,
+      /🔴NotNow\s*/,
+      /🧩Product\s*/,
+      /📈Business\s*/,
+      /📢Marketing\s*/,
+      /🔒Security\s*/,
+      /👩‍💼Others\s*/,
+      /💳Sales\s*/  # Handle existing sales icon too
+    ]
+    
+    clean_notes = notes
+    classification_patterns.each do |pattern|
+      clean_notes = clean_notes.gsub(pattern, '')
+    end
+    
+    # Clean up multiple newlines and whitespace
+    clean_notes.gsub(/\n\n+/, "\n\n").strip
   end
 
   def display_task_summary(task, number)

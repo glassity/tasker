@@ -374,14 +374,20 @@ class GoogleTasksClient
 
   def update_task(list_id, task_id, title: nil, notes: nil, due: nil, status: nil)
     ensure_authenticated
+    puts "API Call: update_task(list_id: #{list_id}, task_id: #{task_id})" if ENV['DEBUG']
     task = Google::Apis::TasksV1::Task.new
+    task.id = task_id  # Set the task ID on the task object
     task.title = title if title
     task.notes = notes if notes
     task.due = due if due
     task.status = status if status
 
     handle_api_error do
-      @service.update_task(list_id, task_id, task)
+      puts "Calling Google Tasks API: @service.update_task(#{list_id}, #{task_id}, task)" if ENV['DEBUG']
+      puts "Task object ID set to: #{task.id}" if ENV['DEBUG']
+      result = @service.update_task(list_id, task_id, task)
+      puts "API Response successful: #{result.class}" if ENV['DEBUG']
+      result
     end
   end
 
