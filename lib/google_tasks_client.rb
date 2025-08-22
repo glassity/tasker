@@ -356,7 +356,28 @@ class GoogleTasksClient
   def get_task(list_id, task_id)
     ensure_authenticated
     handle_api_error do
-      @service.get_task(list_id, task_id)
+      task = @service.get_task(list_id, task_id)
+      
+      # Debug specific task if it matches the one we're investigating
+      if task_id == 'eGxBNEdCSmJKa2F5Q1VmTQ' && ENV['DEBUG']
+        puts "\n=== DEBUGGING SPECIFIC TASK #{task_id} ==="
+        puts "Task object class: #{task.class}"
+        puts "All task methods:"
+        task.methods.sort.each { |m| puts "  #{m}" }
+        puts "\nAll instance variables:"
+        task.instance_variables.each do |var|
+          puts "  #{var}: #{task.instance_variable_get(var)}"
+        end
+        puts "\nTask as JSON:"
+        puts task.to_json if task.respond_to?(:to_json)
+        puts "\nTask as Hash:"
+        puts task.to_h if task.respond_to?(:to_h)
+        puts "\nRaw task inspection:"
+        puts task.inspect
+        puts "=== END DEBUGGING ==="
+      end
+      
+      task
     end
   end
 

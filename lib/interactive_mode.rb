@@ -566,6 +566,63 @@ class InteractiveMode
     end
   end
 
+  def debug_task_in_current_list(args)
+    return puts "Usage: debug <task_id_or_number>" if args.nil? || args.empty?
+
+    task_id = resolve_task_id(args)
+    puts "Resolved task ID: #{task_id}"
+    return unless task_id
+
+    begin
+      puts "Fetching detailed task information..."
+      task = @client.get_task(@current_list[:id], task_id)
+      
+      puts "\n=== COMPLETE TASK ANALYSIS ==="
+      puts "Task ID: #{task.id}"
+      puts "Title: #{task.title}"
+      puts "Status: #{task.status}"
+      puts "Notes: #{task.notes || '(none)'}"
+      puts "Due: #{task.due || '(none)'}"
+      puts "Completed: #{task.completed || '(none)'}"
+      puts "Updated: #{task.updated || '(none)'}"
+      puts
+      
+      puts "=== TASK OBJECT DETAILS ==="
+      puts "Class: #{task.class}"
+      puts
+      
+      puts "=== ALL AVAILABLE METHODS ==="
+      relevant_methods = task.methods.select { |m| !m.to_s.start_with?('_') && m.to_s.length < 20 }
+      relevant_methods.sort.each { |method| puts "  #{method}" }
+      puts
+      
+      puts "=== INSTANCE VARIABLES ==="
+      task.instance_variables.each do |var|
+        value = task.instance_variable_get(var)
+        puts "  #{var}: #{value.inspect}"
+      end
+      puts
+      
+      puts "=== TASK AS HASH ==="
+      if task.respond_to?(:to_h)
+        task.to_h.each do |key, value|
+          puts "  #{key}: #{value.inspect}"
+        end
+      else
+        puts "Task doesn't respond to :to_h"
+      end
+      puts
+      
+      puts "=== RAW INSPECTION ==="
+      puts task.inspect
+      puts "=========================="
+      
+    rescue => e
+      puts "Error debugging task: #{e.message}"
+      puts e.backtrace.first(3).join("\n") if ENV['DEBUG']
+    end
+  end
+
   private
 
   def extract_priority_from_notes(notes)
@@ -887,6 +944,12 @@ class InteractiveMode
     when 'agenda'
       if @current_context == :list
         agenda_workflow(@current_list[:id])
+      else
+        puts "Error: No list context set. Use 'use <list_name>' first."
+      end
+    when 'debug'
+      if @current_context == :list
+        debug_task_in_current_list(args)
       else
         puts "Error: No list context set. Use 'use <list_name>' first."
       end
