@@ -226,7 +226,180 @@ class InteractiveMode
     end
   end
 
+  def grooming_workflow(list_id = nil)
+    # Use provided list_id or current list
+    working_list_id = list_id || @current_list[:id]
+    working_list_title = if list_id
+                          list = @client.get_task_list(list_id)
+                          list.title
+                        else
+                          @current_list[:title]
+                        end
+
+    puts "🧹 Starting GTD Grooming Workflow"
+    puts "List: #{working_list_title}"
+    puts "=" * 60
+    puts
+
+    begin
+      # Step 1: Find all uncompleted tasks that are overdue or have no due date
+      puts "📋 Gathering tasks for grooming..."
+      all_tasks = @client.list_tasks(working_list_id, show_completed: false)
+      
+      # Filter tasks: past due date OR no due date
+      grooming_tasks = all_tasks.select do |task|
+        if task.due.nil?
+          true  # No due date
+        else
+          begin
+            due_time = Time.parse(task.due)
+            due_time < Time.now  # Past due
+          rescue
+            true  # Invalid due date, include in grooming
+          end
+        end
+      end
+
+      if grooming_tasks.empty?
+        puts "✅ All tasks are properly scheduled! No grooming needed."
+        return
+      end
+
+      # Sort by creation date (assuming id order represents creation order)
+      grooming_tasks.sort! { |a, b| a.id <=> b.id }
+
+      puts "Found #{grooming_tasks.length} task#{'s' if grooming_tasks.length != 1} needing grooming:"
+      grooming_tasks.each_with_index do |task, index|
+        status = task.due.nil? ? "No due date" : "Overdue"
+        puts "  #{index + 1}. #{task.title} (#{status})"
+      end
+      puts
+
+      # Step 2: Review phase - handle tasks with empty/minimal notes first
+      unreviewed_tasks = grooming_tasks.select do |task|
+        notes = task.notes || ""
+        # Consider a task unreviewed if notes are empty or only contain basic text without priority/department emojis
+        notes.empty? || !(notes.include?('🔥') || notes.include?('🟢') || notes.include?('🟠') || notes.include?('🔴'))
+      end
+
+      if unreviewed_tasks.any?
+        puts "📝 REVIEW PHASE: #{unreviewed_tasks.length} task#{'s' if unreviewed_tasks.length != 1} need review first"
+        puts "-" * 40
+        
+        unreviewed_tasks.each_with_index do |task, index|
+          puts "\n🔍 Reviewing task #{index + 1} of #{unreviewed_tasks.length}:"
+          puts "Title: #{task.title}"
+          puts "Notes: #{task.notes || '(empty)'}"
+          puts
+
+          # Set context temporarily for review
+          original_context = [@current_context, @current_list]
+          @current_context = :list
+          @current_list = {id: working_list_id, title: working_list_title}
+
+          # Perform review
+          puts "Starting review process..."
+          review_task_by_object(task)
+
+          # Restore original context
+          @current_context, @current_list = original_context
+          
+          puts "✅ Review completed for: #{task.title}"
+          puts
+        end
+        
+        puts "📝 Review phase completed! All tasks are now classified."
+        puts
+      end
+
+      # Step 3: Planning phase - schedule all tasks
+      puts "📅 PLANNING PHASE: Scheduling #{grooming_tasks.length} task#{'s' if grooming_tasks.length != 1}"
+      puts "-" * 40
+
+      grooming_tasks.each_with_index do |task, index|
+        # Fetch fresh task data in case it was updated during review
+        fresh_task = @client.get_task(working_list_id, task.id)
+        
+        puts "\n📋 Planning task #{index + 1} of #{grooming_tasks.length}:"
+        puts "Title: #{fresh_task.title}"
+        
+        if fresh_task.notes && !fresh_task.notes.empty?
+          puts "Classification: #{fresh_task.notes.split("\n").first}"  # Show first line (usually the classification)
+        end
+        
+        if fresh_task.due
+          begin
+            current_due = Time.parse(fresh_task.due)
+            if current_due < Time.now
+              puts "Current due date: #{current_due.strftime('%Y-%m-%d %H:%M')} (OVERDUE)"
+            else
+              puts "Current due date: #{current_due.strftime('%Y-%m-%d %H:%M')}"
+            end
+          rescue
+            puts "Current due date: #{fresh_task.due} (invalid format)"
+          end
+        else
+          puts "Current due date: (none)"
+        end
+        puts
+
+        # Set context temporarily for planning
+        original_context = [@current_context, @current_list]
+        @current_context = :list
+        @current_list = {id: working_list_id, title: working_list_title}
+
+        # Plan the task
+        selected_date = select_planning_date
+        
+        if selected_date && selected_date != :cancel
+          @client.update_task(working_list_id, fresh_task.id,
+                             title: fresh_task.title,
+                             notes: fresh_task.notes,
+                             due: selected_date)
+          
+          if selected_date
+            formatted_date = Time.parse(selected_date).strftime('%A, %B %d, %Y at %H:%M')
+            puts "✅ Scheduled for: #{formatted_date}"
+          else
+            puts "✅ Due date removed"
+          end
+        elsif selected_date == :cancel
+          puts "⏭️  Skipped scheduling"
+        end
+
+        # Restore original context
+        @current_context, @current_list = original_context
+        
+        puts
+      end
+
+      puts "🎉 GTD Grooming completed!"
+      puts "All #{grooming_tasks.length} task#{'s' if grooming_tasks.length != 1} have been processed."
+      puts
+
+    rescue => e
+      puts "Error during grooming workflow: #{e.message}"
+      puts e.backtrace.first(3).join("\n") if ENV['DEBUG']
+    end
+  end
+
   private
+
+  def review_task_by_object(task)
+    puts "Reviewing task: #{task.title}"
+    puts "Current notes: #{task.notes || '(empty)'}" if ENV['DEBUG']
+    puts
+
+    # Select priority
+    priority = select_priority
+    return if priority.nil?
+
+    # Select department
+    department = select_department
+    
+    # Update task with new classification
+    update_task_classification(task, priority, department, task.id)
+  end
 
   def select_planning_date
     puts "Select when to schedule this task:"
@@ -238,7 +411,7 @@ class InteractiveMode
     puts "  6. Next Thursday" 
     puts "  7. Next Friday"
     puts "  8. Remove current date"
-    puts "  9. Cancel"
+    puts "  9. Skip this task"
     puts
     print "Enter your choice (1-9): "
 
@@ -278,11 +451,31 @@ class InteractiveMode
       # Remove date
       nil
     when '9'
-      # Cancel
-      return nil
+      # Skip
+      :cancel
     else
       puts "Invalid choice. Please select 1-9."
       select_planning_date
+    end
+  end
+
+  def edit_field(field_name, current_value)
+    print "#{field_name} [#{current_value || '(none)'}]: "
+    
+    unless $stdin.tty?
+      # In non-TTY mode (like testing), return current value
+      puts "(keeping current)"
+      return current_value
+    end
+    
+    input = $stdin.gets.chomp.strip
+    
+    if input.empty?
+      current_value
+    elsif input == "(clear)" || input == "(none)"
+      nil
+    else
+      input
     end
   end
 
@@ -437,6 +630,12 @@ class InteractiveMode
       else
         puts "Error: No list context set. Use 'use <list_name>' first."
       end
+    when 'grooming'
+      if @current_context == :list
+        grooming_workflow(@current_list[:id])
+      else
+        puts "Error: No list context set. Use 'use <list_name>' first."
+      end
     else
       puts "Unknown command: #{command}. Type 'help' for available commands."
     end
@@ -466,6 +665,7 @@ class InteractiveMode
       puts "  search <text>          - Search for uncompleted tasks containing text"
       puts "  plan <task_id>         - Quickly schedule task (today, tomorrow, next week, etc.)"
       puts "  review <task_id>       - Review and classify task with priority/department"
+      puts "  grooming               - GTD workflow: review unclassified tasks then schedule all overdue/unscheduled tasks"
     else
       puts "List context commands (available when in a list context):"
       puts "  tasks, list [--completed] [--limit N] - Show tasks in current list"
@@ -477,6 +677,7 @@ class InteractiveMode
       puts "  search <text>          - Search for uncompleted tasks containing text"
       puts "  plan <task_id>         - Quickly schedule task (today, tomorrow, next week, etc.)"
       puts "  review <task_id>       - Review and classify task with priority/department"
+      puts "  grooming               - GTD workflow: review unclassified tasks then schedule all overdue/unscheduled tasks"
     end
     puts
   end

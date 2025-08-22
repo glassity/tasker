@@ -166,6 +166,14 @@ class TaskerCLI < Thor
     puts "Error: #{e.message}"
   end
 
+  desc 'grooming LIST_ID', 'GTD grooming workflow: review unclassified tasks then schedule all overdue/unscheduled tasks'
+  def grooming(list_id)
+    interactive_mode = InteractiveMode.new(client)
+    interactive_mode.grooming_workflow(list_id)
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
   private
 
   def client
