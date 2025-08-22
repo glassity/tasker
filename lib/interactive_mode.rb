@@ -109,6 +109,69 @@ class InteractiveMode
     end
   end
 
+  def search_tasks_in_current_list(args)
+    return puts "Usage: search <text>" if args.nil? || args.empty?
+
+    search_text = args.strip.downcase
+    puts "Searching for tasks containing: \"#{search_text}\""
+    puts "List: #{@current_list[:title]}"
+    puts
+
+    begin
+      # Get all uncompleted tasks from current list
+      tasks = @client.list_tasks(@current_list[:id], show_completed: false)
+      puts "Found #{tasks.length} uncompleted tasks total" if ENV['DEBUG']
+
+      # Filter tasks that contain the search text in title or notes
+      matching_tasks = tasks.select do |task|
+        title_match = task.title&.downcase&.include?(search_text)
+        notes_match = task.notes&.downcase&.include?(search_text)
+        match = title_match || notes_match
+        
+        puts "Task '#{task.title}': title_match=#{title_match}, notes_match=#{notes_match}" if ENV['DEBUG']
+        match
+      end
+
+      if matching_tasks.empty?
+        puts "No uncompleted tasks found containing \"#{search_text}\""
+      else
+        puts "Found #{matching_tasks.length} matching task#{'s' if matching_tasks.length != 1}:"
+        puts
+
+        matching_tasks.each_with_index do |task, index|
+          # Show task number, title, and highlight where match was found
+          puts "#{index + 1}. #{task.title}"
+          puts "   ID: #{task.id}"
+          
+          # Show notes if they exist and contain match
+          if task.notes && !task.notes.empty?
+            if task.notes.downcase.include?(search_text)
+              puts "   Notes: #{task.notes}"
+            end
+          end
+          
+          # Show due date if exists
+          if task.due
+            begin
+              due_date = Time.parse(task.due)
+              puts "   Due: #{due_date.strftime('%Y-%m-%d %H:%M')}"
+            rescue
+              puts "   Due: #{task.due}"
+            end
+          end
+          
+          puts
+        end
+        
+        puts "Use 'show <number>' or 'edit <number>' to work with these tasks."
+        puts "Task numbers: 1-#{matching_tasks.length} correspond to the search results above."
+      end
+
+    rescue => e
+      puts "Error searching tasks: #{e.message}"
+    end
+  end
+
   private
 
   def edit_field(field_name, current_value)
@@ -225,6 +288,12 @@ class InteractiveMode
       else
         puts "Error: No list context set. Use 'use <list_name>' first."
       end
+    when 'search'
+      if @current_context == :list
+        search_tasks_in_current_list(args)
+      else
+        puts "Error: No list context set. Use 'use <list_name>' first."
+      end
     else
       puts "Unknown command: #{command}. Type 'help' for available commands."
     end
@@ -251,6 +320,7 @@ class InteractiveMode
       puts "  delete <task_id>       - Delete a task"
       puts "  show <task_id>         - Show full task details"
       puts "  edit <task_id>         - Edit task title, notes, or due date"
+      puts "  search <text>          - Search for uncompleted tasks containing text"
       puts "  review <task_id>       - Review and classify task with priority/department"
     else
       puts "List context commands (available when in a list context):"
@@ -260,6 +330,7 @@ class InteractiveMode
       puts "  delete <task_id>       - Delete a task"
       puts "  show <task_id>         - Show full task details"
       puts "  edit <task_id>         - Edit task title, notes, or due date"
+      puts "  search <text>          - Search for uncompleted tasks containing text"
       puts "  review <task_id>       - Review and classify task with priority/department"
     end
     puts
