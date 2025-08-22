@@ -26,16 +26,18 @@ This is a Ruby-based Google Tasks client that implements Getting Things Done (GT
 - `./bin/tasker agenda LIST_ID` - **NEW**: Time-block today's tasks in 30-minute slots
 - `./bin/tasker grooming LIST_ID` - **NEW**: GTD grooming workflow
 
-## NEW: Agenda Time-Blocking Feature
+## NEW: Hybrid Agenda Time-Blocking Feature
 
 ### What it does
-The `agenda` command implements daily time-blocking by scheduling today's tasks into focused 30-minute work sessions:
+The `agenda` command implements a hybrid GTD approach combining Google Tasks + Google Calendar:
 
 1. **Finds today's tasks**: All uncompleted tasks with due date = today
-2. **Priority sorting**: Automatically orders tasks by priority (🔥Hot → 🟢Must → 🟠Nice → 🔴NotNow → No priority)
-3. **Time slot assignment**: Creates 30-minute focused work blocks starting from current time
-4. **Interactive scheduling**: User confirms each time slot assignment
-5. **Agenda summary**: Provides final daily schedule for focused execution
+2. **Priority sorting**: Automatically orders tasks by priority (🔥Hot → 🟢Must → 🟠Nice → 🔴NotNow → No priority)  
+3. **Hybrid scheduling**: 
+   - 📋 **Google Tasks**: Keeps tasks clean with today's due date (no time pollution)
+   - 📅 **Google Calendar**: Creates time-blocked events for precise scheduling
+4. **Interactive time-blocking**: User confirms each 30-minute time slot
+5. **Dual-system agenda**: Tasks for completion tracking, calendar for time awareness
 
 ### Usage Examples
 
@@ -76,23 +78,32 @@ Found 4 tasks for today:
 Task: 🔥Hot Prepare presentation
 Classification: 🔥Hot 🧩Product
 Schedule this task for 14:30-15:00? (y/n/s=skip): y
+Creating calendar event for time slot...
 ✅ Scheduled: Prepare presentation
-   Time: 14:30-15:00
+   📋 Google Tasks: Due today
+   📅 Google Calendar: 14:30-15:00
 
 📋 Time Slot 2: 15:00-15:30
 Task: 🟢Must Call client meeting
 Schedule this task for 15:00-15:30? (y/n/s=skip): y
+Creating calendar event for time slot...
 ✅ Scheduled: Call client meeting
-   Time: 15:00-15:30
+   📋 Google Tasks: Due today  
+   📅 Google Calendar: 15:00-15:30
 
-============================================================
-📅 TODAY'S AGENDA SUMMARY
-============================================================
-14:30-15:00 | 🔥Hot Prepare presentation
-15:00-15:30 | 🟢Must Call client meeting
+================================================================================
+📅 TODAY'S HYBRID AGENDA SUMMARY
+================================================================================
+📋 Google Tasks: All scheduled tasks are due today
+📅 Google Calendar: Time-blocked schedule below
 
-🎯 Ready for focused work! 2 tasks scheduled.
-💡 Tip: Use 30-minute focused work sessions with 5-minute breaks between tasks.
+14:30-15:00 | 🔥Hot Prepare presentation 📅
+15:00-15:30 | 🟢Must Call client meeting 📅
+
+🎯 Hybrid approach activated! 2 tasks scheduled.
+📋 Tasks remain in Google Tasks (clean, no time pollution)
+📅 Calendar events created for precise time-blocking
+💡 Tip: Use your calendar for time awareness, tasks for completion tracking
 ```
 
 ## NEW: Grooming Workflow Feature
@@ -168,6 +179,15 @@ Current due date: (none)
 🎉 GTD Grooming completed!
 All 5 tasks have been processed.
 ```
+
+## Authentication Requirements
+
+The hybrid agenda feature requires both Google Tasks and Google Calendar API access:
+
+1. **Google Tasks API**: Already configured with existing OAuth setup
+2. **Google Calendar API**: Uses the same OAuth credentials and token file
+3. **Scopes**: The application now requests both Tasks and Calendar permissions
+4. **First-time setup**: User may need to re-authenticate to grant Calendar access
 
 ## Testing Guidelines
 

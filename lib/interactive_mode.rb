@@ -1,8 +1,10 @@
 require_relative 'google_tasks_client'
+require_relative 'google_calendar_client'
 
 class InteractiveMode
-  def initialize(client)
+  def initialize(client, calendar_client = nil)
     @client = client
+    @calendar_client = calendar_client || GoogleCalendarClient.new
     @current_context = nil
     @current_list = nil
     @running = true
@@ -486,33 +488,43 @@ class InteractiveMode
 
         case confirm
         when 'y', 'yes', ''
-          # Google Tasks API limitation: Only supports date, not time
-          # Solution: Store time info in notes and set due date to today
-          time_slot_info = "⏰ Scheduled: #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}"
-          
-          # Add time slot to notes while preserving existing classification
-          updated_notes = if task.notes && !task.notes.empty?
-                           # Check if notes already contain time info and replace it
-                           if task.notes.include?('⏰ Scheduled:')
-                             task.notes.gsub(/⏰ Scheduled: \d{2}:\d{2}-\d{2}:\d{2}/, time_slot_info)
-                           else
-                             "#{task.notes}\n#{time_slot_info}"
-                           end
-                         else
-                           time_slot_info
-                         end
-          
-          # Set due date to today (Google Tasks API only supports dates)
-          today_due_date = Date.today.strftime('%Y-%m-%dT00:00:00.000Z')
-          
-          puts "Google Tasks API limitation: Cannot set specific times, only dates" if ENV['DEBUG']
-          puts "Storing time slot in notes: #{time_slot_info}" if ENV['DEBUG']
-          puts "Setting due date to today: #{today_due_date}" if ENV['DEBUG']
-          
-          @client.update_task(working_list_id, task.id,
-                             title: task.title,
-                             notes: updated_notes,
-                             due: today_due_date)
+          # Hybrid approach: Keep task in Google Tasks, create calendar event for time slot
+          begin
+            # Ensure calendar authentication
+            @calendar_client.ensure_authenticated
+            
+            # Create calendar event for this time slot
+            puts "Creating calendar event for time slot..." if ENV['DEBUG']
+            calendar_event = @calendar_client.create_task_event(
+              task.title,
+              slot_start,
+              slot_end,
+              task.notes
+            )
+            
+            puts "Calendar event created successfully!" if ENV['DEBUG']
+            puts "Event link: #{calendar_event.html_link}" if ENV['DEBUG']
+            
+            # Keep task in Google Tasks with today's date (no time pollution)
+            today_due_date = Date.today.strftime('%Y-%m-%dT00:00:00.000Z')
+            
+            puts "Updating task due date to today (keeping task clean)" if ENV['DEBUG']
+            @client.update_task(working_list_id, task.id,
+                               title: task.title,
+                               notes: task.notes,  # Keep original notes clean
+                               due: today_due_date)
+            
+          rescue => e
+            puts "Error creating calendar event: #{e.message}"
+            puts "Task will remain in Google Tasks without calendar integration."
+            
+            # Fallback: just update task due date
+            today_due_date = Date.today.strftime('%Y-%m-%dT00:00:00.000Z')
+            @client.update_task(working_list_id, task.id,
+                               title: task.title,
+                               notes: task.notes,
+                               due: today_due_date)
+          end
           
           # Verify the update was successful
           if ENV['DEBUG']
@@ -523,11 +535,13 @@ class InteractiveMode
           scheduled_tasks << {
             task: task,
             time_slot: "#{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}",
-            start_time: slot_start
+            start_time: slot_start,
+            calendar_event: (calendar_event rescue nil)
           }
           
           puts "✅ Scheduled: #{task.title}"
-          puts "   Time: #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}"
+          puts "   📋 Google Tasks: Due today"
+          puts "   📅 Google Calendar: #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}"
           
         when 's', 'skip'
           puts "⏭️  Skipped: #{task.title}"
@@ -541,21 +555,28 @@ class InteractiveMode
 
       # Step 5: Show final agenda summary
       if scheduled_tasks.any?
-        puts "\n" + "=" * 60
-        puts "📅 TODAY'S AGENDA SUMMARY"
-        puts "=" * 60
+        puts "\n" + "=" * 80
+        puts "📅 TODAY'S HYBRID AGENDA SUMMARY"
+        puts "=" * 80
+        
+        puts "📋 Google Tasks: All scheduled tasks are due today"
+        puts "📅 Google Calendar: Time-blocked schedule below"
+        puts
         
         scheduled_tasks.each do |item|
           priority_emoji = extract_priority_from_notes(item[:task].notes)
           priority_text = priority_emoji || "○"
-          puts "#{item[:time_slot]} | #{priority_text} #{item[:task].title}"
+          calendar_status = item[:calendar_event] ? "📅" : "⚠️"
+          puts "#{item[:time_slot]} | #{priority_text} #{item[:task].title} #{calendar_status}"
         end
         
-        puts "\n🎯 Ready for focused work! #{scheduled_tasks.length} task#{'s' if scheduled_tasks.length != 1} scheduled."
-        puts "💡 Tip: Use 30-minute focused work sessions with 5-minute breaks between tasks."
+        puts "\n🎯 Hybrid approach activated! #{scheduled_tasks.length} task#{'s' if scheduled_tasks.length != 1} scheduled."
+        puts "📋 Tasks remain in Google Tasks (clean, no time pollution)"
+        puts "📅 Calendar events created for precise time-blocking"
+        puts "💡 Tip: Use your calendar for time awareness, tasks for completion tracking"
       else
         puts "\n📝 No tasks were scheduled for specific times."
-        puts "All tasks remain with their original today due dates."
+        puts "All tasks remain with their original due dates."
       end
       
       puts
