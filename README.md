@@ -5,6 +5,7 @@ A Ruby-based Google Tasks client implementing Getting Things Done (GTD) methodol
 ## 🚀 Features
 
 - **Full GTD Implementation** - Complete Getting Things Done workflow with grooming, review, and planning
+- **Daily Time-Blocking** - Agenda feature schedules today's tasks in 30-minute focused work slots
 - **Interactive Mode** - Context-aware shell for efficient task management
 - **Smart Scheduling** - Quick date selection (today, tomorrow, next week)
 - **Task Classification** - Priority and department-based organization
@@ -124,6 +125,75 @@ Enter your choice (1-9): 5
 All 8 tasks have been processed.
 ```
 
+### Agenda Command - Daily Time-Blocking
+
+The `agenda` command transforms your daily task list into a focused work schedule using time-blocking methodology.
+
+**What it does:**
+1. **Finds today's tasks** - All uncompleted tasks with due date = today
+2. **Priority sorting** - Orders by priority: 🔥Hot → 🟢Must → 🟠Nice → 🔴NotNow → Unclassified
+3. **30-minute time slots** - Creates focused work blocks starting from current time (rounded to next 30-min)
+4. **Interactive scheduling** - Confirm each time slot or skip tasks
+5. **Daily agenda summary** - Final schedule for focused execution
+
+#### Interactive Mode:
+```bash
+./bin/tasker interactive
+> use "My Tasks"
+> agenda
+```
+
+#### Console Mode:
+```bash
+./bin/tasker agenda LIST_ID
+```
+
+#### Example Agenda Session:
+```
+📅 Starting Daily Agenda Time-Blocking
+List: 💼 Work Tasks
+============================================================
+
+📋 Gathering today's tasks...
+Found 4 tasks for today:
+  1. ○ Review quarterly report
+  2. 🔥Hot Prepare client presentation  
+  3. 🟢Must Schedule team meeting
+  4. 🟠Nice Update project documentation
+
+📊 Tasks ordered by priority:
+  1. 🔥Hot Prepare client presentation
+  2. 🟢Must Schedule team meeting
+  3. ○ Review quarterly report
+  4. 🟠Nice Update project documentation
+
+⏰ Scheduling tasks in 30-minute time blocks starting from 14:30
+------------------------------------------------------------
+
+📋 Time Slot 1: 14:30-15:00
+Task: 🔥Hot Prepare client presentation
+Classification: 🔥Hot 📈Business
+Schedule this task for 14:30-15:00? (y/n/s=skip): y
+✅ Scheduled: Prepare client presentation
+   Time: 14:30-15:00
+
+📋 Time Slot 2: 15:00-15:30  
+Task: 🟢Must Schedule team meeting
+Schedule this task for 15:00-15:30? (y/n/s=skip): y
+✅ Scheduled: Schedule team meeting
+   Time: 15:00-15:30
+
+============================================================
+📅 TODAY'S AGENDA SUMMARY
+============================================================
+14:30-15:00 | 🔥Hot Prepare client presentation
+15:00-15:30 | 🟢Must Schedule team meeting
+16:00-16:30 | ○ Review quarterly report
+
+🎯 Ready for focused work! 3 tasks scheduled.
+💡 Tip: Use 30-minute focused work sessions with 5-minute breaks between tasks.
+```
+
 ## 💻 Interactive Mode
 
 Launch interactive mode for the best task management experience:
@@ -155,6 +225,7 @@ Launch interactive mode for the best task management experience:
 | `search <text>` | Search uncompleted tasks | `search "report"` |
 | `plan <task_id/number>` | Quick schedule task | `plan 1` |
 | `review <task_id/number>` | Classify task priority/department | `review 2` |
+| `agenda` | **Time-blocking** - schedule today's tasks in 30-min slots | `agenda` |
 | `grooming` | **GTD workflow** - review & schedule tasks | `grooming` |
 
 ### Interactive Examples
@@ -272,6 +343,7 @@ All commands support `--credentials path/to/file.json` for custom OAuth files.
 ./bin/tasker delete-task LIST_ID TASK_ID
 
 # GTD Workflow
+./bin/tasker agenda LIST_ID      # Time-block today's tasks in 30-minute slots
 ./bin/tasker grooming LIST_ID    # Complete GTD grooming workflow
 ./bin/tasker interactive         # Launch interactive mode
 ```

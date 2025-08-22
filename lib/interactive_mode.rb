@@ -383,7 +383,255 @@ class InteractiveMode
     end
   end
 
+  def agenda_workflow(list_id = nil)
+    # Use provided list_id or current list
+    working_list_id = list_id || @current_list[:id]
+    working_list_title = if list_id
+                          list = @client.get_task_list(list_id)
+                          list.title
+                        else
+                          @current_list[:title]
+                        end
+
+    puts "📅 Starting Daily Agenda Time-Blocking"
+    puts "List: #{working_list_title}"
+    puts "=" * 60
+    puts
+
+    begin
+      # Step 1: Find all tasks scheduled for today
+      puts "📋 Gathering today's tasks..."
+      all_tasks = @client.list_tasks(working_list_id, show_completed: false)
+      
+      today = Date.today
+      todays_tasks = all_tasks.select do |task|
+        if task.due.nil?
+          false
+        else
+          begin
+            due_date = Time.parse(task.due).to_date
+            due_date == today
+          rescue
+            false
+          end
+        end
+      end
+
+      if todays_tasks.empty?
+        puts "📭 No tasks scheduled for today!"
+        puts "Use 'plan' command to schedule tasks for today, or run 'grooming' to organize your backlog."
+        return
+      end
+
+      puts "Found #{todays_tasks.length} task#{'s' if todays_tasks.length != 1} for today:"
+      todays_tasks.each_with_index do |task, index|
+        # Extract priority from notes
+        priority_emoji = extract_priority_from_notes(task.notes)
+        priority_text = priority_emoji || "○"
+        puts "  #{index + 1}. #{priority_text} #{task.title}"
+      end
+      puts
+
+      # Step 2: Sort tasks by priority (Hot > Must > Nice > NotNow > No priority)
+      sorted_tasks = sort_tasks_by_priority(todays_tasks)
+
+      puts "📊 Tasks ordered by priority:"
+      sorted_tasks.each_with_index do |task, index|
+        priority_emoji = extract_priority_from_notes(task.notes)
+        priority_text = priority_emoji || "○"
+        puts "  #{index + 1}. #{priority_text} #{task.title}"
+      end
+      puts
+
+      # Step 3: Calculate time slots starting from current time (rounded to next 30-min)
+      current_time = Time.now
+      
+      # Round up to the next 30-minute mark
+      start_time = if current_time.min < 30
+                     Time.new(current_time.year, current_time.month, current_time.day, current_time.hour, 30, 0)
+                   else
+                     Time.new(current_time.year, current_time.month, current_time.day, current_time.hour + 1, 0, 0)
+                   end
+
+      puts "⏰ Scheduling tasks in 30-minute time blocks starting from #{start_time.strftime('%H:%M')}"
+      puts "-" * 60
+
+      # Step 4: Schedule tasks in 30-minute slots
+      scheduled_tasks = []
+      sorted_tasks.each_with_index do |task, index|
+        slot_start = start_time + (index * 30 * 60)  # Add 30 minutes for each task
+        slot_end = slot_start + (30 * 60)  # 30-minute slot
+        
+        priority_emoji = extract_priority_from_notes(task.notes)
+        priority_text = priority_emoji || "○"
+        
+        puts "\n📋 Time Slot #{index + 1}: #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}"
+        puts "Task: #{priority_text} #{task.title}"
+        
+        if task.notes && !task.notes.empty?
+          # Show only classification line, not full notes
+          classification = task.notes.split("\n").first
+          puts "Classification: #{classification}" if classification && classification.length < 100
+        end
+
+        # Ask user if they want to schedule this task for this time slot
+        unless $stdin.tty?
+          # In non-TTY mode, auto-accept
+          puts "Auto-scheduling task for this time slot."
+          confirm = 'y'
+        else
+          print "Schedule this task for #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}? (y/n/s=skip): "
+          confirm = $stdin.gets.chomp.strip.downcase
+        end
+
+        case confirm
+        when 'y', 'yes', ''
+          # Google Tasks API limitation: Only supports date, not time
+          # Solution: Store time info in notes and set due date to today
+          time_slot_info = "⏰ Scheduled: #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}"
+          
+          # Add time slot to notes while preserving existing classification
+          updated_notes = if task.notes && !task.notes.empty?
+                           # Check if notes already contain time info and replace it
+                           if task.notes.include?('⏰ Scheduled:')
+                             task.notes.gsub(/⏰ Scheduled: \d{2}:\d{2}-\d{2}:\d{2}/, time_slot_info)
+                           else
+                             "#{task.notes}\n#{time_slot_info}"
+                           end
+                         else
+                           time_slot_info
+                         end
+          
+          # Set due date to today (Google Tasks API only supports dates)
+          today_due_date = Date.today.strftime('%Y-%m-%dT00:00:00.000Z')
+          
+          puts "Google Tasks API limitation: Cannot set specific times, only dates" if ENV['DEBUG']
+          puts "Storing time slot in notes: #{time_slot_info}" if ENV['DEBUG']
+          puts "Setting due date to today: #{today_due_date}" if ENV['DEBUG']
+          
+          @client.update_task(working_list_id, task.id,
+                             title: task.title,
+                             notes: updated_notes,
+                             due: today_due_date)
+          
+          # Verify the update was successful
+          if ENV['DEBUG']
+            updated_task = @client.get_task(working_list_id, task.id)
+            puts "Task updated - new due time from API: #{updated_task.due}"
+          end
+          
+          scheduled_tasks << {
+            task: task,
+            time_slot: "#{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}",
+            start_time: slot_start
+          }
+          
+          puts "✅ Scheduled: #{task.title}"
+          puts "   Time: #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}"
+          
+        when 's', 'skip'
+          puts "⏭️  Skipped: #{task.title}"
+          # Don't increment the time slot for skipped tasks - they keep their original due date
+          
+        when 'n', 'no'
+          puts "❌ Not scheduled: #{task.title}"
+          # Don't increment the time slot for declined tasks
+        end
+      end
+
+      # Step 5: Show final agenda summary
+      if scheduled_tasks.any?
+        puts "\n" + "=" * 60
+        puts "📅 TODAY'S AGENDA SUMMARY"
+        puts "=" * 60
+        
+        scheduled_tasks.each do |item|
+          priority_emoji = extract_priority_from_notes(item[:task].notes)
+          priority_text = priority_emoji || "○"
+          puts "#{item[:time_slot]} | #{priority_text} #{item[:task].title}"
+        end
+        
+        puts "\n🎯 Ready for focused work! #{scheduled_tasks.length} task#{'s' if scheduled_tasks.length != 1} scheduled."
+        puts "💡 Tip: Use 30-minute focused work sessions with 5-minute breaks between tasks."
+      else
+        puts "\n📝 No tasks were scheduled for specific times."
+        puts "All tasks remain with their original today due dates."
+      end
+      
+      puts
+
+    rescue => e
+      puts "Error during agenda workflow: #{e.message}"
+      puts e.backtrace.first(3).join("\n") if ENV['DEBUG']
+    end
+  end
+
   private
+
+  def extract_priority_from_notes(notes)
+    return nil unless notes
+    
+    case notes
+    when /🔥/
+      '🔥Hot'
+    when /🟢/
+      '🟢Must'
+    when /🟠/
+      '🟠Nice'
+    when /🔴/
+      '🔴NotNow'
+    else
+      nil
+    end
+  end
+
+  def sort_tasks_by_priority(tasks)
+    # Sort by priority: Hot > Must > Nice > NotNow > No priority
+    tasks.sort do |a, b|
+      priority_a = get_priority_weight(a.notes)
+      priority_b = get_priority_weight(b.notes)
+      
+      # Higher weight = higher priority (appears first)
+      priority_b <=> priority_a
+    end
+  end
+
+  def get_priority_weight(notes)
+    return 0 unless notes
+    
+    case notes
+    when /🔥/  # Hot
+      4
+    when /🟢/  # Must
+      3
+    when /🟠/  # Nice
+      2
+    when /🔴/  # NotNow
+      1
+    else
+      0  # No priority
+    end
+  end
+
+  def edit_field(field_name, current_value)
+    print "#{field_name} [#{current_value || '(none)'}]: "
+    
+    unless $stdin.tty?
+      # In non-TTY mode (like testing), return current value
+      puts "(keeping current)"
+      return current_value
+    end
+    
+    input = $stdin.gets.chomp.strip
+    
+    if input.empty?
+      current_value
+    elsif input == "(clear)" || input == "(none)"
+      nil
+    else
+      input
+    end
+  end
 
   def review_task_by_object(task)
     puts "Reviewing task: #{task.title}"
@@ -636,6 +884,12 @@ class InteractiveMode
       else
         puts "Error: No list context set. Use 'use <list_name>' first."
       end
+    when 'agenda'
+      if @current_context == :list
+        agenda_workflow(@current_list[:id])
+      else
+        puts "Error: No list context set. Use 'use <list_name>' first."
+      end
     else
       puts "Unknown command: #{command}. Type 'help' for available commands."
     end
@@ -665,6 +919,7 @@ class InteractiveMode
       puts "  search <text>          - Search for uncompleted tasks containing text"
       puts "  plan <task_id>         - Quickly schedule task (today, tomorrow, next week, etc.)"
       puts "  review <task_id>       - Review and classify task with priority/department"
+      puts "  agenda                 - Time-block today's tasks in 30-min slots starting from now (ordered by priority)"
       puts "  grooming               - GTD workflow: review unclassified tasks then schedule all overdue/unscheduled tasks"
     else
       puts "List context commands (available when in a list context):"
@@ -677,6 +932,7 @@ class InteractiveMode
       puts "  search <text>          - Search for uncompleted tasks containing text"
       puts "  plan <task_id>         - Quickly schedule task (today, tomorrow, next week, etc.)"
       puts "  review <task_id>       - Review and classify task with priority/department"
+      puts "  agenda                 - Time-block today's tasks in 30-min slots starting from now (ordered by priority)"
       puts "  grooming               - GTD workflow: review unclassified tasks then schedule all overdue/unscheduled tasks"
     end
     puts

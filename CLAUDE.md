@@ -17,12 +17,83 @@ This is a Ruby-based Google Tasks client that implements Getting Things Done (GT
 - `search <text>` - Search uncompleted tasks containing text
 - `plan <task_id>` - Quickly schedule task (today, tomorrow, next week, etc.)
 - `review <task_id>` - Review and classify task with priority/department
+- `agenda` - **NEW**: Time-block today's tasks in 30-min slots starting from now (ordered by priority)
 - `grooming` - **NEW**: GTD workflow for reviewing and scheduling tasks
 
 ### Console Commands
 - `./bin/tasker lists`
 - `./bin/tasker tasks LIST_ID`
+- `./bin/tasker agenda LIST_ID` - **NEW**: Time-block today's tasks in 30-minute slots
 - `./bin/tasker grooming LIST_ID` - **NEW**: GTD grooming workflow
+
+## NEW: Agenda Time-Blocking Feature
+
+### What it does
+The `agenda` command implements daily time-blocking by scheduling today's tasks into focused 30-minute work sessions:
+
+1. **Finds today's tasks**: All uncompleted tasks with due date = today
+2. **Priority sorting**: Automatically orders tasks by priority (🔥Hot → 🟢Must → 🟠Nice → 🔴NotNow → No priority)
+3. **Time slot assignment**: Creates 30-minute focused work blocks starting from current time
+4. **Interactive scheduling**: User confirms each time slot assignment
+5. **Agenda summary**: Provides final daily schedule for focused execution
+
+### Usage Examples
+
+**Interactive Mode:**
+```bash
+# After selecting a list with 'use <list_name>'
+agenda
+```
+
+**Console Mode:**
+```bash
+./bin/tasker agenda LIST_ID
+```
+
+### Expected Output Flow
+```
+📅 Starting Daily Agenda Time-Blocking
+List: My Task List
+============================================================
+
+📋 Gathering today's tasks...
+Found 4 tasks for today:
+  1. ○ Review quarterly report
+  2. 🔥Hot Prepare presentation
+  3. 🟢Must Call client meeting
+  4. 🟠Nice Update documentation
+
+📊 Tasks ordered by priority:
+  1. 🔥Hot Prepare presentation
+  2. 🟢Must Call client meeting  
+  3. ○ Review quarterly report
+  4. 🟠Nice Update documentation
+
+⏰ Scheduling tasks in 30-minute time blocks starting from 14:30
+------------------------------------------------------------
+
+📋 Time Slot 1: 14:30-15:00
+Task: 🔥Hot Prepare presentation
+Classification: 🔥Hot 🧩Product
+Schedule this task for 14:30-15:00? (y/n/s=skip): y
+✅ Scheduled: Prepare presentation
+   Time: 14:30-15:00
+
+📋 Time Slot 2: 15:00-15:30
+Task: 🟢Must Call client meeting
+Schedule this task for 15:00-15:30? (y/n/s=skip): y
+✅ Scheduled: Call client meeting
+   Time: 15:00-15:30
+
+============================================================
+📅 TODAY'S AGENDA SUMMARY
+============================================================
+14:30-15:00 | 🔥Hot Prepare presentation
+15:00-15:30 | 🟢Must Call client meeting
+
+🎯 Ready for focused work! 2 tasks scheduled.
+💡 Tip: Use 30-minute focused work sessions with 5-minute breaks between tasks.
+```
 
 ## NEW: Grooming Workflow Feature
 
