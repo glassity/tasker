@@ -66,7 +66,98 @@ class InteractiveMode
     end
   end
 
+  def edit_task_in_current_list(args)
+    return puts "Usage: edit <task_id_or_number>" if args.nil? || args.empty?
+
+    task_id = resolve_task_id(args)
+    puts "Resolved task ID: #{task_id}" if ENV['DEBUG']
+    return unless task_id
+
+    begin
+      puts "Fetching task with ID: #{task_id} from list: #{@current_list[:id]}" if ENV['DEBUG']
+      task = @client.get_task(@current_list[:id], task_id)
+      puts "Editing task: #{task.title}"
+      puts
+
+      # Show current values
+      puts "Current values:"
+      puts "  Title: #{task.title}"
+      puts "  Notes: #{task.notes || '(none)'}"
+      puts "  Due: #{task.due ? Time.parse(task.due).strftime('%Y-%m-%d %H:%M') : '(none)'}"
+      puts "  Status: #{task.status || 'needsAction'}"
+      puts
+
+      # Allow user to edit each field
+      new_title = edit_field("Title", task.title)
+      new_notes = edit_field("Notes", task.notes)
+      new_due = edit_due_date(task.due)
+
+      # Update the task with new values
+      puts "Updating task..." if ENV['DEBUG']
+      @client.update_task(@current_list[:id], task_id, 
+                         title: new_title, 
+                         notes: new_notes, 
+                         due: new_due)
+      
+      puts "\nTask updated successfully!"
+      puts "New title: #{new_title}"
+      puts "New notes: #{new_notes || '(none)'}"
+      puts "New due: #{new_due ? Time.parse(new_due).strftime('%Y-%m-%d %H:%M') : '(none)'}"
+      
+    rescue => e
+      puts "Error: #{e.message}"
+    end
+  end
+
   private
+
+  def edit_field(field_name, current_value)
+    print "#{field_name} [#{current_value || '(none)'}]: "
+    
+    unless $stdin.tty?
+      # In non-TTY mode (like testing), return current value
+      puts "(keeping current)"
+      return current_value
+    end
+    
+    input = $stdin.gets.chomp.strip
+    
+    if input.empty?
+      current_value
+    elsif input == "(clear)" || input == "(none)"
+      nil
+    else
+      input
+    end
+  end
+
+  def edit_due_date(current_due)
+    current_display = current_due ? Time.parse(current_due).strftime('%Y-%m-%d %H:%M') : '(none)'
+    print "Due date (YYYY-MM-DD HH:MM or 'clear') [#{current_display}]: "
+    
+    unless $stdin.tty?
+      # In non-TTY mode (like testing), return current value
+      puts "(keeping current)"
+      return current_due
+    end
+    
+    input = $stdin.gets.chomp.strip
+    
+    if input.empty?
+      current_due
+    elsif input == "clear" || input == "(clear)" || input == "(none)"
+      nil
+    else
+      begin
+        # Parse the date and convert to RFC3339 format
+        parsed_date = Time.parse(input)
+        parsed_date.utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+      rescue ArgumentError
+        puts "Invalid date format. Keeping current value."
+        current_due
+      end
+    end
+  end
 
   def prompt
     if @current_context == :list && @current_list
@@ -128,6 +219,12 @@ class InteractiveMode
       else
         puts "Error: No list context set. Use 'use <list_name>' first."
       end
+    when 'edit'
+      if @current_context == :list
+        edit_task_in_current_list(args)
+      else
+        puts "Error: No list context set. Use 'use <list_name>' first."
+      end
     else
       puts "Unknown command: #{command}. Type 'help' for available commands."
     end
@@ -153,6 +250,7 @@ class InteractiveMode
       puts "  complete <task_id>     - Mark a task as completed"
       puts "  delete <task_id>       - Delete a task"
       puts "  show <task_id>         - Show full task details"
+      puts "  edit <task_id>         - Edit task title, notes, or due date"
       puts "  review <task_id>       - Review and classify task with priority/department"
     else
       puts "List context commands (available when in a list context):"
@@ -161,6 +259,7 @@ class InteractiveMode
       puts "  complete <task_id>     - Mark a task as completed"
       puts "  delete <task_id>       - Delete a task"
       puts "  show <task_id>         - Show full task details"
+      puts "  edit <task_id>         - Edit task title, notes, or due date"
       puts "  review <task_id>       - Review and classify task with priority/department"
     end
     puts
