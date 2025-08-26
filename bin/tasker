@@ -35,7 +35,9 @@ class TaskerCLI < Thor
   option :demo, type: :boolean, default: false, desc: 'Run in demo mode (for testing without TTY)'
   def interactive
     begin
-      interactive_mode = InteractiveMode.new(client)
+      require_relative '../lib/google_calendar_client'
+      calendar_client = GoogleCalendarClient.new(options[:credentials])
+      interactive_mode = InteractiveMode.new(client, calendar_client)
       if options[:demo]
         interactive_mode.demo
       else
@@ -170,6 +172,16 @@ class TaskerCLI < Thor
   def grooming(list_id)
     interactive_mode = InteractiveMode.new(client)
     interactive_mode.grooming_workflow(list_id)
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
+  desc 'agenda LIST_ID', 'Time-block today\'s tasks in 30-minute slots starting from now (ordered by priority)'
+  def agenda(list_id)
+    require_relative '../lib/google_calendar_client'
+    calendar_client = GoogleCalendarClient.new(options[:credentials])
+    interactive_mode = InteractiveMode.new(client, calendar_client)
+    interactive_mode.agenda_workflow(list_id)
   rescue => e
     puts "Error: #{e.message}"
   end

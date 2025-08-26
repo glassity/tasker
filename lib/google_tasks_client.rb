@@ -8,7 +8,10 @@ require 'webrick'
 require 'uri'
 
 class GoogleTasksClient
-  SCOPE = ['https://www.googleapis.com/auth/tasks'].freeze
+  SCOPE = [
+    'https://www.googleapis.com/auth/tasks',
+    'https://www.googleapis.com/auth/calendar'
+  ].freeze
   CREDENTIALS_PATH = 'oauth_credentials.json'.freeze
   TOKEN_PATH = 'token.yaml'.freeze
 
@@ -356,7 +359,28 @@ class GoogleTasksClient
   def get_task(list_id, task_id)
     ensure_authenticated
     handle_api_error do
-      @service.get_task(list_id, task_id)
+      task = @service.get_task(list_id, task_id)
+      
+      # Debug specific task if it matches the one we're investigating
+      if task_id == 'eGxBNEdCSmJKa2F5Q1VmTQ' && ENV['DEBUG']
+        puts "\n=== DEBUGGING SPECIFIC TASK #{task_id} ==="
+        puts "Task object class: #{task.class}"
+        puts "All task methods:"
+        task.methods.sort.each { |m| puts "  #{m}" }
+        puts "\nAll instance variables:"
+        task.instance_variables.each do |var|
+          puts "  #{var}: #{task.instance_variable_get(var)}"
+        end
+        puts "\nTask as JSON:"
+        puts task.to_json if task.respond_to?(:to_json)
+        puts "\nTask as Hash:"
+        puts task.to_h if task.respond_to?(:to_h)
+        puts "\nRaw task inspection:"
+        puts task.inspect
+        puts "=== END DEBUGGING ==="
+      end
+      
+      task
     end
   end
 
@@ -375,18 +399,56 @@ class GoogleTasksClient
   def update_task(list_id, task_id, title: nil, notes: nil, due: nil, status: nil)
     ensure_authenticated
     puts "API Call: update_task(list_id: #{list_id}, task_id: #{task_id})" if ENV['DEBUG']
+    
+    # First, get the current task to check its current state
+    current_task = get_task(list_id, task_id)
+    puts "Current task due: #{current_task.due}" if ENV['DEBUG']
+    puts "Current task due format: #{current_task.due ? (current_task.due.include?('T') ? 'specific time' : 'all-day') : 'no due date'}" if ENV['DEBUG']
+    
+    # Create new task object with all fields
     task = Google::Apis::TasksV1::Task.new
     task.id = task_id  # Set the task ID on the task object
+    
+    # Always set fields explicitly to ensure they're updated
     task.title = title if title
     task.notes = notes if notes
-    task.due = due if due
+    
+    # Handle due date - ensure it's properly set even if nil
+    if due
+      task.due = due
+      puts "Task object due date set to: #{task.due}" if ENV['DEBUG']
+      
+      # Check if current task has "all day" format and we're setting a specific time
+      if current_task.due && !current_task.due.include?('T') && due.include?('T')
+        puts "Converting from all-day to specific time" if ENV['DEBUG']
+      end
+    else
+      # If due is explicitly nil, we want to clear the due date
+      task.due = nil
+      puts "Task object due date cleared (set to nil)" if ENV['DEBUG']
+    end
+    
     task.status = status if status
+    
+    puts "Complete task object before API call:" if ENV['DEBUG']
+    puts "  ID: #{task.id}" if ENV['DEBUG']
+    puts "  Title: #{task.title}" if ENV['DEBUG']
+    puts "  Notes: #{task.notes}" if ENV['DEBUG']
+    puts "  Due: #{task.due}" if ENV['DEBUG']
+    puts "  Status: #{task.status}" if ENV['DEBUG']
+    puts "  Task object class: #{task.class}" if ENV['DEBUG']
+    puts "  Task object methods containing 'due': #{task.methods.grep(/due/)}" if ENV['DEBUG']
 
     handle_api_error do
       puts "Calling Google Tasks API: @service.update_task(#{list_id}, #{task_id}, task)" if ENV['DEBUG']
-      puts "Task object ID set to: #{task.id}" if ENV['DEBUG']
       result = @service.update_task(list_id, task_id, task)
       puts "API Response successful: #{result.class}" if ENV['DEBUG']
+      
+      # Log the returned task's due date to verify the update
+      if ENV['DEBUG'] && result.respond_to?(:due)
+        puts "API returned task due date: #{result.due}"
+      end
+      
       result
     end
   end

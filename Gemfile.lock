@@ -15,6 +15,8 @@ GEM
       faraday (>= 1, < 3)
     faraday-net_http (3.4.1)
       net-http (>= 0.5.0)
+    google-apis-calendar_v3 (0.48.0)
+      google-apis-core (>= 0.15.0, < 2.a)
     google-apis-core (1.0.1)
       addressable (~> 2.8, >= 2.8.7)
       faraday (~> 2.13)
@@ -111,6 +113,7 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
+  google-apis-calendar_v3 (~> 0.31)
   google-apis-tasks_v1 (~> 0.23)
   googleauth (~> 1.8)
   launchy (~> 2.5)

@@ -1,6 +1,7 @@
 source 'https://rubygems.org'
 
 gem 'google-apis-tasks_v1', '~> 0.23'
+gem 'google-apis-calendar_v3', '~> 0.31'
 gem 'googleauth', '~> 1.8'
 gem 'thor', '~> 1.3'
 gem 'launchy', '~> 2.5'
