@@ -488,9 +488,12 @@ class InteractiveMode
 
         case confirm
         when 'y', 'yes', ''
+          calendar_event = nil
+          
           # Hybrid approach: Keep task in Google Tasks, create calendar event for time slot
           begin
             # Ensure calendar authentication
+            puts "Checking calendar authentication..." if ENV['DEBUG']
             @calendar_client.ensure_authenticated
             
             # Create calendar event for this time slot
@@ -505,43 +508,40 @@ class InteractiveMode
             puts "Calendar event created successfully!" if ENV['DEBUG']
             puts "Event link: #{calendar_event.html_link}" if ENV['DEBUG']
             
-            # Keep task in Google Tasks with today's date (no time pollution)
-            today_due_date = Date.today.strftime('%Y-%m-%dT00:00:00.000Z')
-            
-            puts "Updating task due date to today (keeping task clean)" if ENV['DEBUG']
-            @client.update_task(working_list_id, task.id,
-                               title: task.title,
-                               notes: task.notes,  # Keep original notes clean
-                               due: today_due_date)
-            
           rescue => e
-            puts "Error creating calendar event: #{e.message}"
-            puts "Task will remain in Google Tasks without calendar integration."
-            
-            # Fallback: just update task due date
-            today_due_date = Date.today.strftime('%Y-%m-%dT00:00:00.000Z')
-            @client.update_task(working_list_id, task.id,
-                               title: task.title,
-                               notes: task.notes,
-                               due: today_due_date)
+            puts "❌ Error creating calendar event: #{e.message}"
+            puts "📋 Task will remain in Google Tasks without calendar integration."
+            puts "🔍 Debug: Calendar error - #{e.class}: #{e.message}" if ENV['DEBUG']
+            calendar_event = nil
           end
           
-          # Verify the update was successful
+          # Update task with specific time from the agenda slot to avoid "all day" appearance
+          specific_due_time = slot_start.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+          begin
+            puts "Updating task due date to specific time: #{specific_due_time}" if ENV['DEBUG']
+            @client.update_task(list_id, task.id, due: specific_due_time)
+            puts "Task due date updated successfully to #{specific_due_time}" if ENV['DEBUG']
+          rescue => update_error
+            puts "❌ Warning: Could not update task due date: #{update_error.message}"
+            puts "🔍 Debug: Task update error - #{update_error.class}: #{update_error.message}" if ENV['DEBUG']
+          end
+          
+          # Calendar event created, task due date updated with specific time
           if ENV['DEBUG']
-            updated_task = @client.get_task(working_list_id, task.id)
-            puts "Task updated - new due time from API: #{updated_task.due}"
+            puts "Task due date updated with specific time, calendar event provides time-blocking"
           end
           
           scheduled_tasks << {
             task: task,
             time_slot: "#{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}",
             start_time: slot_start,
-            calendar_event: (calendar_event rescue nil)
+            calendar_event: calendar_event
           }
           
           puts "✅ Scheduled: #{task.title}"
-          puts "   📋 Google Tasks: Due today"
-          puts "   📅 Google Calendar: #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}"
+          puts "   📋 Google Tasks: Due #{slot_start.strftime('%H:%M')}"
+          calendar_status = calendar_event ? "✅ Created" : "❌ Failed"
+          puts "   📅 Google Calendar: #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')} #{calendar_status}"
           
         when 's', 'skip'
           puts "⏭️  Skipped: #{task.title}"
@@ -559,7 +559,7 @@ class InteractiveMode
         puts "📅 TODAY'S HYBRID AGENDA SUMMARY"
         puts "=" * 80
         
-        puts "📋 Google Tasks: All scheduled tasks are due today"
+        puts "📋 Google Tasks: Due dates updated with specific times"
         puts "📅 Google Calendar: Time-blocked schedule below"
         puts
         
@@ -571,9 +571,9 @@ class InteractiveMode
         end
         
         puts "\n🎯 Hybrid approach activated! #{scheduled_tasks.length} task#{'s' if scheduled_tasks.length != 1} scheduled."
-        puts "📋 Tasks remain in Google Tasks (clean, no time pollution)"
+        puts "📋 Tasks updated in Google Tasks with specific due times"
         puts "📅 Calendar events created for precise time-blocking"
-        puts "💡 Tip: Use your calendar for time awareness, tasks for completion tracking"
+        puts "💡 Tip: Both platforms now show specific times (no more 'all day')"
       else
         puts "\n📝 No tasks were scheduled for specific times."
         puts "All tasks remain with their original due dates."
