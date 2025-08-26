@@ -502,7 +502,9 @@ class InteractiveMode
               task.title,
               slot_start,
               slot_end,
-              task.notes
+              task.notes,
+              task.id,
+              list_id
             )
             
             puts "Calendar event created successfully!" if ENV['DEBUG']
@@ -516,10 +518,17 @@ class InteractiveMode
           end
           
           # Update task with specific time from the agenda slot to avoid "all day" appearance
+          # IMPORTANT: Preserve existing task title and notes when updating due date
           specific_due_time = slot_start.strftime('%Y-%m-%dT%H:%M:%S.000Z')
           begin
             puts "Updating task due date to specific time: #{specific_due_time}" if ENV['DEBUG']
-            @client.update_task(list_id, task.id, due: specific_due_time)
+            puts "Preserving task title: #{task.title}" if ENV['DEBUG']
+            puts "Preserving task notes: #{task.notes}" if ENV['DEBUG']
+            
+            @client.update_task(list_id, task.id, 
+                               title: task.title,
+                               notes: task.notes,
+                               due: specific_due_time)
             puts "Task due date updated successfully to #{specific_due_time}" if ENV['DEBUG']
           rescue => update_error
             puts "❌ Warning: Could not update task due date: #{update_error.message}"

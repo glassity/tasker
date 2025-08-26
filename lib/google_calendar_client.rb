@@ -44,12 +44,12 @@ class GoogleCalendarClient
   end
 
   # Create a calendar event for a task time slot
-  def create_task_event(task_title, start_time, end_time, task_notes = nil)
+  def create_task_event(task_title, start_time, end_time, task_notes = nil, task_id = nil, list_id = nil)
     ensure_authenticated
     
     event = Google::Apis::CalendarV3::Event.new
     event.summary = "📋 #{task_title}"
-    event.description = build_event_description(task_notes)
+    event.description = build_event_description(task_notes, task_id, list_id, task_title)
     
     # Set start time - use UTC format to avoid timezone issues
     event.start = Google::Apis::CalendarV3::EventDateTime.new
@@ -69,12 +69,12 @@ class GoogleCalendarClient
   end
 
   # Update an existing calendar event
-  def update_task_event(event_id, task_title, start_time, end_time, task_notes = nil)
+  def update_task_event(event_id, task_title, start_time, end_time, task_notes = nil, task_id = nil, list_id = nil)
     ensure_authenticated
     
     event = Google::Apis::CalendarV3::Event.new
     event.summary = "📋 #{task_title}"
-    event.description = build_event_description(task_notes)
+    event.description = build_event_description(task_notes, task_id, list_id, task_title)
     
     # Set start time - use UTC format to avoid timezone issues
     event.start = Google::Apis::CalendarV3::EventDateTime.new
@@ -226,7 +226,7 @@ class GoogleCalendarClient
     nil
   end
 
-  def build_event_description(task_notes)
+  def build_event_description(task_notes, task_id = nil, list_id = nil, task_title = nil)
     description = "🎯 Focused Work Session\n\n"
     
     if task_notes && !task_notes.empty?
@@ -234,6 +234,13 @@ class GoogleCalendarClient
       if task_notes.match(/🔥|🟢|🟠|🔴/)
         description += "#{task_notes}\n\n"
       end
+    end
+    
+    # Add link to original Google Task with task title as link text
+    if task_id && list_id && task_title
+      # Google Tasks web URL format with HTML link
+      task_url = "https://tasks.google.com/task/#{task_id}?list=#{list_id}"
+      description += "📋 Original Task: <a href=\"#{task_url}\">#{task_title}</a>\n\n"
     end
     
     description += "Created by GTD Task Manager\n"
