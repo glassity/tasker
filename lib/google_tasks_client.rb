@@ -8,7 +8,10 @@ require 'webrick'
 require 'uri'
 
 class GoogleTasksClient
-  SCOPE = ['https://www.googleapis.com/auth/tasks'].freeze
+  SCOPE = [
+    'https://www.googleapis.com/auth/tasks',
+    'https://www.googleapis.com/auth/calendar'
+  ].freeze
   CREDENTIALS_PATH = 'oauth_credentials.json'.freeze
   TOKEN_PATH = 'token.yaml'.freeze
 
