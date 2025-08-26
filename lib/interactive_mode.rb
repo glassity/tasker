@@ -484,12 +484,16 @@ class InteractiveMode
           puts "Auto-scheduling task for this time slot."
           confirm = 'y'
         else
-          print "Schedule this task for #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}? (y/n/s=skip): "
-          confirm = $stdin.gets.chomp.strip.downcase
+          puts "Options: y=schedule, n=no, s=skip, c=complete task now, or enter time (e.g. 14:30)"
+          print "Schedule this task for #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}? (y/n/s/c/HH:MM): "
+          confirm = $stdin.gets.chomp.strip
         end
 
-        case confirm
-        when 'y', 'yes', ''
+        # Check if user entered a custom time
+        custom_time = parse_custom_time(confirm)
+        
+        case 
+        when confirm.downcase == 'y' || confirm.downcase == 'yes' || confirm == ''
           calendar_event = nil
           
           # Hybrid approach: Keep task in Google Tasks, create calendar event for time slot
@@ -557,12 +561,107 @@ class InteractiveMode
           # Increment slot_index only when a task is actually scheduled
           slot_index += 1
           
-        when 's', 'skip'
+        when confirm.downcase == 's' || confirm.downcase == 'skip'
           puts "⏭️  Skipped: #{task.title} (time slot will be reused)"
           # Don't increment slot_index - next task will use the same time slot
           
-        when 'n', 'no'
+        when confirm.downcase == 'c' || confirm.downcase == 'complete'
+          # Mark task as completed and reuse time slot
+          begin
+            puts "Marking task as completed..." if ENV['DEBUG']
+            @client.complete_task(list_id, task.id)
+            puts "✅ Completed: #{task.title} (time slot will be reused)"
+            puts "   📋 Google Tasks: Marked as completed"
+            puts "   📅 Google Calendar: No event created"
+          rescue => complete_error
+            puts "❌ Error completing task: #{complete_error.message}"
+            puts "⏭️  Skipped instead: #{task.title} (time slot will be reused)"
+          end
+          # Don't increment slot_index - next task will use the same time slot
+          
+        when custom_time
+          # User entered a custom time - ask for duration
+          duration_minutes = get_duration_choice
+          
+          if duration_minutes
+            custom_slot_end = custom_time + (duration_minutes * 60)
+            
+            puts "📅 Custom scheduling: #{custom_time.strftime('%H:%M')}-#{custom_slot_end.strftime('%H:%M')} (#{duration_minutes}min)"
+            print "Confirm custom time slot? (y/n): "
+            time_confirm = $stdin.gets.chomp.strip.downcase
+            
+            if time_confirm == 'y' || time_confirm == 'yes' || time_confirm == ''
+              calendar_event = nil
+              
+              # Create calendar event for custom time slot
+              begin
+                puts "Checking calendar authentication..." if ENV['DEBUG']
+                @calendar_client.ensure_authenticated
+                
+                puts "Creating calendar event for custom time slot..." if ENV['DEBUG']
+                calendar_event = @calendar_client.create_task_event(
+                  task.title,
+                  custom_time,
+                  custom_slot_end,
+                  task.notes,
+                  task.id,
+                  list_id
+                )
+                
+                puts "Calendar event created successfully!" if ENV['DEBUG']
+                puts "Event link: #{calendar_event.html_link}" if ENV['DEBUG']
+                
+              rescue => e
+                puts "❌ Error creating calendar event: #{e.message}"
+                puts "📋 Task will remain in Google Tasks without calendar integration."
+                puts "🔍 Debug: Calendar error - #{e.class}: #{e.message}" if ENV['DEBUG']
+                calendar_event = nil
+              end
+              
+              # Update task with custom time
+              custom_due_time = custom_time.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+              begin
+                puts "Updating task due date to custom time: #{custom_due_time}" if ENV['DEBUG']
+                puts "Preserving task title: #{task.title}" if ENV['DEBUG']
+                puts "Preserving task notes: #{task.notes}" if ENV['DEBUG']
+                
+                @client.update_task(list_id, task.id, 
+                                   title: task.title,
+                                   notes: task.notes,
+                                   due: custom_due_time)
+                puts "Task due date updated successfully to #{custom_due_time}" if ENV['DEBUG']
+              rescue => update_error
+                puts "❌ Warning: Could not update task due date: #{update_error.message}"
+                puts "🔍 Debug: Task update error - #{update_error.class}: #{update_error.message}" if ENV['DEBUG']
+              end
+              
+              scheduled_tasks << {
+                task: task,
+                time_slot: "#{custom_time.strftime('%H:%M')}-#{custom_slot_end.strftime('%H:%M')}",
+                start_time: custom_time,
+                calendar_event: calendar_event
+              }
+              
+              puts "✅ Custom Scheduled: #{task.title}"
+              puts "   📋 Google Tasks: Due #{custom_time.strftime('%H:%M')}"
+              calendar_status = calendar_event ? "✅ Created" : "❌ Failed"
+              puts "   📅 Google Calendar: #{custom_time.strftime('%H:%M')}-#{custom_slot_end.strftime('%H:%M')} #{calendar_status}"
+              
+              # Don't increment slot_index - this task used a custom time, not the current slot
+            else
+              puts "❌ Custom time cancelled: #{task.title} (time slot will be reused)"
+            end
+          else
+            puts "❌ Duration selection cancelled: #{task.title} (time slot will be reused)"
+          end
+          
+        when confirm.downcase == 'n' || confirm.downcase == 'no'
           puts "❌ Not scheduled: #{task.title} (time slot will be reused)"
+          # Don't increment slot_index - next task will use the same time slot
+          
+        else
+          puts "❌ Invalid input '#{confirm}': #{task.title} (time slot will be reused)"
+          puts "Valid options: y, n, s, c, or time format like 14:30"
           # Don't increment slot_index - next task will use the same time slot
         end
       end
@@ -659,6 +758,61 @@ class InteractiveMode
   end
 
   private
+
+  def parse_custom_time(input, base_date = Date.today)
+    # Parse time input like "14:30", "2:30 PM", "14", etc.
+    return nil unless input
+    
+    # Remove common variations and normalize
+    time_str = input.strip.downcase
+    
+    # Match patterns like "14:30", "2:30", "14", "2"
+    if time_str.match(/^(\d{1,2})(?::(\d{2}))?(?:\s*(am|pm))?$/)
+      hour = $1.to_i
+      minute = $2 ? $2.to_i : 0
+      ampm = $3
+      
+      # Handle AM/PM
+      if ampm == 'pm' && hour != 12
+        hour += 12
+      elsif ampm == 'am' && hour == 12
+        hour = 0
+      end
+      
+      # Validate hour and minute
+      return nil unless (0..23).include?(hour) && (0..59).include?(minute)
+      
+      # Create time object for today
+      Time.new(base_date.year, base_date.month, base_date.day, hour, minute, 0)
+    else
+      nil
+    end
+  end
+
+  def get_duration_choice
+    puts "\nSelect duration for this task:"
+    puts "1. 15 minutes"
+    puts "2. 30 minutes (default)"
+    puts "3. 1 hour"
+    puts "4. Cancel"
+    print "Choose duration (1-4): "
+    
+    choice = $stdin.gets.chomp.strip
+    
+    case choice
+    when '1'
+      15
+    when '2', ''
+      30
+    when '3'
+      60
+    when '4'
+      nil
+    else
+      puts "Invalid choice, using default 30 minutes"
+      30
+    end
+  end
 
   def extract_priority_from_notes(notes)
     return nil unless notes
