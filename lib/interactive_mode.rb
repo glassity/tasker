@@ -460,14 +460,16 @@ class InteractiveMode
 
       # Step 4: Schedule tasks in 30-minute slots
       scheduled_tasks = []
-      sorted_tasks.each_with_index do |task, index|
-        slot_start = start_time + (index * 30 * 60)  # Add 30 minutes for each task
+      slot_index = 0  # Track actual time slots used (doesn't increment for skipped tasks)
+      
+      sorted_tasks.each_with_index do |task, task_index|
+        slot_start = start_time + (slot_index * 30 * 60)  # Add 30 minutes for each USED slot
         slot_end = slot_start + (30 * 60)  # 30-minute slot
         
         priority_emoji = extract_priority_from_notes(task.notes)
         priority_text = priority_emoji || "○"
         
-        puts "\n📋 Time Slot #{index + 1}: #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}"
+        puts "\n📋 Time Slot #{slot_index + 1}: #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}"
         puts "Task: #{priority_text} #{task.title}"
         
         if task.notes && !task.notes.empty?
@@ -552,13 +554,16 @@ class InteractiveMode
           calendar_status = calendar_event ? "✅ Created" : "❌ Failed"
           puts "   📅 Google Calendar: #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')} #{calendar_status}"
           
+          # Increment slot_index only when a task is actually scheduled
+          slot_index += 1
+          
         when 's', 'skip'
-          puts "⏭️  Skipped: #{task.title}"
-          # Don't increment the time slot for skipped tasks - they keep their original due date
+          puts "⏭️  Skipped: #{task.title} (time slot will be reused)"
+          # Don't increment slot_index - next task will use the same time slot
           
         when 'n', 'no'
-          puts "❌ Not scheduled: #{task.title}"
-          # Don't increment the time slot for declined tasks
+          puts "❌ Not scheduled: #{task.title} (time slot will be reused)"
+          # Don't increment slot_index - next task will use the same time slot
         end
       end
 
