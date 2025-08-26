@@ -1489,20 +1489,31 @@ class InteractiveMode
   def display_task_summary(task, number)
     status_icon = task.status == 'completed' ? '✓' : '○'
     
-    # Truncate title if longer than 75 characters
-    title = task.title.length > 75 ? "#{task.title[0..74]}... +More" : task.title
+    # Build single line display with task info
+    line = "  #{number}. #{status_icon} #{task.title}"
     
-    puts "  #{number}. #{status_icon} #{title}"
-    
-    # Show notes in brackets format, truncated
+    # Add notes inline if present (shortened)
     if task.notes && !task.notes.empty?
-      notes = task.notes.length > 75 ? "#{task.notes[0..74]}... +More" : task.notes
-      puts "     [#{notes}]"
+      # Extract first priority/classification for compact display
+      first_line = task.notes.split("\n").first
+      if first_line && first_line.length <= 30
+        line += " [#{first_line}]"
+      else
+        # Show truncated notes
+        notes_preview = first_line ? first_line[0..25] + "..." : task.notes[0..25] + "..."
+        line += " [#{notes_preview}]"
+      end
     end
     
-    # Show due date if present
-    puts "     Due: #{task.due}" if task.due
-    puts
+    # Add due date inline if present
+    if task.due
+      due_time = task.due.include?('T') ? 
+        Time.parse(task.due).strftime('%m/%d %H:%M') : 
+        Time.parse(task.due).strftime('%m/%d')
+      line += " (Due: #{due_time})"
+    end
+    
+    puts line
   end
 
   def display_task_full(task, list = nil)
