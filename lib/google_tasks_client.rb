@@ -188,11 +188,50 @@ class GoogleTasksClient
     puts "Exchanging authorization code for tokens..."
     
     begin
-      credentials = authorizer.get_and_store_credentials_from_code(
-        user_id: user_id, 
-        code: code, 
-        base_url: redirect_uri
-      )
+      # Add timeout handling for the token exchange
+      credentials = nil
+      error_msg = nil
+      
+      exchange_thread = Thread.new do
+        begin
+          puts "Starting token exchange request to Google..." if ENV['DEBUG']
+          credentials = authorizer.get_and_store_credentials_from_code(
+            user_id: user_id, 
+            code: code, 
+            base_url: redirect_uri
+          )
+          puts "Token exchange request completed successfully." if ENV['DEBUG']
+        rescue => e
+          error_msg = e.message
+          puts "Token exchange request failed: #{e.class} - #{e.message}" if ENV['DEBUG']
+        end
+      end
+      
+      # Wait for the exchange to complete with timeout and countdown
+      timeout_seconds = 30
+      start_time = Time.now
+      
+      while exchange_thread.alive? && (Time.now - start_time) < timeout_seconds
+        elapsed = (Time.now - start_time).to_i
+        remaining = timeout_seconds - elapsed
+        print "\r🔄 Exchanging authorization code for tokens... (#{remaining}s remaining)   "
+        $stdout.flush
+        sleep(1)
+      end
+      
+      unless exchange_thread.join(0.1) # Check if thread completed
+        exchange_thread.kill
+        print "\r❌ Token exchange timed out after 30 seconds.                                \n"
+        raise "Token exchange timed out after 30 seconds. This may be a network connectivity issue or Google API problem. Please check your internet connection and try again."
+      end
+      
+      print "\r✅ Token exchange completed successfully!                                   \n"
+      
+      # Check if the thread encountered an error
+      if error_msg
+        puts "Google OAuth library failed. Trying manual token exchange..." if ENV['DEBUG']
+        credentials = manual_token_exchange(code, redirect_uri)
+      end
       
       puts "Token exchange successful!"
       puts "Access token present: #{!credentials.access_token.nil?}"
@@ -226,6 +265,68 @@ class GoogleTasksClient
     end
   end
 
+  def manual_token_exchange(code, redirect_uri)
+    require 'net/http'
+    require 'uri'
+    require 'json'
+    
+    # Read client credentials
+    client_credentials = JSON.parse(File.read(@credentials_path))
+    client_id = client_credentials['installed']['client_id']
+    client_secret = client_credentials['installed']['client_secret']
+    
+    # Prepare token exchange request
+    uri = URI('https://oauth2.googleapis.com/token')
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.open_timeout = 10
+    http.read_timeout = 30
+    
+    params = {
+      'grant_type' => 'authorization_code',
+      'client_id' => client_id,
+      'client_secret' => client_secret,
+      'redirect_uri' => redirect_uri,
+      'code' => code
+    }
+    
+    request = Net::HTTP::Post.new(uri)
+    request.set_form_data(params)
+    request['Content-Type'] = 'application/x-www-form-urlencoded'
+    
+    puts "Making manual HTTP request to Google token endpoint..." if ENV['DEBUG']
+    
+    response = http.request(request)
+    
+    if response.code == '200'
+      token_data = JSON.parse(response.body)
+      puts "Manual token exchange successful!" if ENV['DEBUG']
+      
+      # Create credentials object manually
+      credentials = Google::Auth::UserRefreshCredentials.new(
+        client_id: client_id,
+        client_secret: client_secret,
+        scope: SCOPE,
+        access_token: token_data['access_token'],
+        refresh_token: token_data['refresh_token'],
+        expires_at: Time.now + token_data['expires_in'].to_i
+      )
+      
+      # Store the credentials manually
+      token_store = Google::Auth::Stores::FileTokenStore.new(file: TOKEN_PATH)
+      token_store.store('default', credentials)
+      
+      puts "Manual token storage completed!" if ENV['DEBUG']
+      credentials
+    else
+      puts "Manual token exchange failed: #{response.code} #{response.body}" if ENV['DEBUG']
+      raise "Manual token exchange failed: #{response.code} - #{response.body}"
+    end
+  rescue => e
+    puts "Manual token exchange error: #{e.message}" if ENV['DEBUG']
+    raise "Manual token exchange failed: #{e.message}"
+  end
+
   def perform_manual_oauth_flow(authorizer, user_id)
     puts "Using manual OAuth flow (out-of-band)..."
     
@@ -252,11 +353,35 @@ class GoogleTasksClient
     
     puts "Exchanging authorization code for tokens..."
     
-    credentials = authorizer.get_and_store_credentials_from_code(
-      user_id: user_id, 
-      code: code, 
-      base_url: redirect_uri
-    )
+    # Add timeout handling for the token exchange
+    credentials = nil
+    exchange_thread = Thread.new do
+      credentials = authorizer.get_and_store_credentials_from_code(
+        user_id: user_id, 
+        code: code, 
+        base_url: redirect_uri
+      )
+    end
+    
+    # Wait for the exchange to complete with timeout and countdown
+    timeout_seconds = 30
+    start_time = Time.now
+    
+    while exchange_thread.alive? && (Time.now - start_time) < timeout_seconds
+      elapsed = (Time.now - start_time).to_i
+      remaining = timeout_seconds - elapsed
+      print "\r🔄 Exchanging authorization code for tokens... (#{remaining}s remaining)   "
+      $stdout.flush
+      sleep(1)
+    end
+    
+    unless exchange_thread.join(0.1) # Check if thread completed
+      exchange_thread.kill
+      print "\r❌ Token exchange timed out after 30 seconds.                                \n"
+      raise "Token exchange timed out after 30 seconds. This may be a network connectivity issue or Google API problem. Please try again."
+    end
+    
+    print "\r✅ Token exchange completed successfully!                                   \n"
     
     puts "Successfully authenticated!"
     credentials
