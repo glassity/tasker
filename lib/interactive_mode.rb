@@ -204,8 +204,17 @@ class InteractiveMode
       # Show planning options
       selected_date = select_planning_date
 
-      if selected_date.nil?
+      if selected_date == :cancel
         puts "Planning cancelled."
+        return
+      elsif selected_date == :complete
+        # Mark task as completed
+        begin
+          @client.complete_task(@current_list[:id], task_id)
+          puts "\nTask marked as completed!"
+        rescue => complete_error
+          puts "❌ Error completing task: #{complete_error.message}"
+        end
         return
       end
 
@@ -353,7 +362,7 @@ class InteractiveMode
         # Plan the task
         selected_date = select_planning_date
         
-        if selected_date && selected_date != :cancel
+        if selected_date && selected_date != :cancel && selected_date != :complete
           @client.update_task(working_list_id, fresh_task.id,
                              title: fresh_task.title,
                              notes: fresh_task.notes,
@@ -364,6 +373,15 @@ class InteractiveMode
             puts "✅ Scheduled for: #{formatted_date}"
           else
             puts "✅ Due date removed"
+          end
+        elsif selected_date == :complete
+          # Mark task as completed
+          begin
+            @client.complete_task(working_list_id, fresh_task.id)
+            puts "✅ Task marked as completed"
+          rescue => complete_error
+            puts "❌ Error completing task: #{complete_error.message}"
+            puts "⏭️  Skipped instead"
           end
         elsif selected_date == :cancel
           puts "⏭️  Skipped scheduling"
@@ -956,9 +974,10 @@ class InteractiveMode
     puts "  6. Next Thursday" 
     puts "  7. Next Friday"
     puts "  8. Remove current date"
-    puts "  9. Skip this task"
+    puts "  9. Mark as completed"
+    puts " 10. Skip this task"
     puts
-    print "Enter your choice (1-9): "
+    print "Enter your choice (1-10): "
 
     unless $stdin.tty?
       # Demo mode - auto-select option 1 (Today)
@@ -996,10 +1015,13 @@ class InteractiveMode
       # Remove date
       nil
     when '9'
+      # Mark as completed
+      :complete
+    when '10'
       # Skip
       :cancel
     else
-      puts "Invalid choice. Please select 1-9."
+      puts "Invalid choice. Please select 1-10."
       select_planning_date
     end
   end
@@ -1451,10 +1473,13 @@ class InteractiveMode
     puts "  2. 📈 Business - Business operations/strategy"
     puts "  3. 📢 Marketing - Marketing and promotion"
     puts "  4. 🔒 Security - Security/compliance tasks"
-    puts "  5. 👩‍💼 Others - General/administrative tasks"
-    puts "  6. None - Skip department classification"
+    puts "  5. 💰 Finance - Financial/accounting tasks"
+    puts "  6. 💳 Sales - Sales and revenue tasks"
+    puts "  7. 🎧 Support - Customer support tasks"
+    puts "  8. 👩‍💼 Others - General/administrative tasks"
+    puts "  9. None - Skip department classification"
     puts
-    print "Enter department number (1-6): "
+    print "Enter department number (1-9): "
     
     unless $stdin.tty?
       # Demo mode - auto-select option 2 (Business)
@@ -1474,11 +1499,17 @@ class InteractiveMode
     when '4'
       '🔒Security'
     when '5'
-      '👩‍💼Others'
+      '💰Finance'
     when '6'
+      '💳Sales'
+    when '7'
+      '🎧Support'
+    when '8'
+      '👩‍💼Others'
+    when '9'
       nil
     else
-      puts "Invalid choice. Please enter 1-6."
+      puts "Invalid choice. Please enter 1-9."
       unless $stdin.tty?
         return nil  # In demo mode, don't retry
       else
@@ -1530,8 +1561,10 @@ class InteractiveMode
       /📈Business\s*/,
       /📢Marketing\s*/,
       /🔒Security\s*/,
-      /👩‍💼Others\s*/,
-      /💳Sales\s*/  # Handle existing sales icon too
+      /💰Finance\s*/,
+      /💳Sales\s*/,
+      /🎧Support\s*/,
+      /👩‍💼Others\s*/
     ]
     
     clean_notes = notes
