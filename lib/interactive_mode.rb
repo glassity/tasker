@@ -759,6 +759,57 @@ class InteractiveMode
 
   private
 
+  def login_command
+    puts "🔐 Forcing re-authentication with Google..."
+    puts "This will clear stored tokens and prompt for fresh OAuth login."
+    puts
+    
+    begin
+      # Force re-authentication by calling the private authenticate method with force_reauth
+      @client.send(:authenticate, true)
+      puts "✅ Re-authentication completed successfully!"
+      puts "You can now use all Google Tasks and Google Calendar features."
+      
+      # Clear the current context since we've refreshed auth
+      if @current_context == :list
+        puts "📋 Refreshing list context..."
+        # Re-fetch the current list to ensure we have fresh data
+        current_list_id = @current_list[:id]
+        fresh_list = @client.get_task_list(current_list_id)
+        @current_list = { id: fresh_list.id, title: fresh_list.title }
+        puts "✅ List context refreshed: #{fresh_list.title}"
+      end
+      
+    rescue => e
+      puts "❌ Authentication failed: #{e.message}"
+      puts "Make sure you have:"
+      puts "1. Valid oauth_credentials.json file"
+      puts "2. Internet connection"
+      puts "3. Access to a web browser for OAuth flow"
+    end
+  end
+
+  def logout_command
+    puts "🚪 Logging out and clearing stored tokens..."
+    
+    begin
+      @client.logout
+      puts "✅ Logout completed successfully!"
+      
+      # Clear current list context since we're logged out
+      if @current_context == :list
+        puts "📋 Exiting list context due to logout."
+        @current_context = nil
+        @current_list = nil
+      end
+      
+      puts "Use 'login' to re-authenticate when ready."
+      
+    rescue => e
+      puts "❌ Error during logout: #{e.message}"
+    end
+  end
+
   def parse_custom_time(input, base_date = Date.today)
     # Parse time input like "14:30", "2:30 PM", "14", etc.
     return nil unless input
@@ -1062,6 +1113,10 @@ class InteractiveMode
     case command
     when 'help'
       show_help
+    when 'login', 'auth'
+      login_command
+    when 'logout'
+      logout_command
     when 'exit', 'quit'
       @running = false
     when 'lists'
@@ -1154,6 +1209,8 @@ class InteractiveMode
     puts
     puts "General commands:"
     puts "  help                    - Show this help message"
+    puts "  login, auth            - Force re-authentication with Google"
+    puts "  logout                 - Clear stored authentication tokens"
     puts "  exit, quit             - Exit interactive mode"
     puts "  lists                  - List all task lists"
     puts "  use <list_name>        - Set context to a specific list"
