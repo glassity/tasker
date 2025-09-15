@@ -276,13 +276,37 @@ class InteractiveMode
         return
       end
 
-      # Sort by creation date (assuming id order represents creation order)
-      grooming_tasks.sort! { |a, b| a.id <=> b.id }
+      # Separate due tasks from new/unscheduled tasks
+      due_tasks = grooming_tasks.select { |task| !task.due.nil? }
+      new_tasks = grooming_tasks.select { |task| task.due.nil? }
+
+      # Sort each group by priority (highest to lowest)
+      due_tasks = sort_tasks_by_priority(due_tasks)
+      new_tasks = sort_tasks_by_priority(new_tasks)
+
+      # Combine: due tasks first, then new tasks
+      grooming_tasks = due_tasks + new_tasks
 
       puts "Found #{grooming_tasks.length} task#{'s' if grooming_tasks.length != 1} needing grooming:"
-      grooming_tasks.each_with_index do |task, index|
-        status = task.due.nil? ? "No due date" : "Overdue"
-        puts "  #{index + 1}. #{task.title} (#{status})"
+
+      # Show due tasks first
+      if due_tasks.any?
+        puts "\n  📅 Due/Overdue Tasks (by priority):"
+        due_tasks.each_with_index do |task, index|
+          priority_emoji = extract_priority_from_notes(task.notes)
+          priority_text = priority_emoji || "○"
+          puts "    #{index + 1}. #{priority_text} #{task.title} (Overdue)"
+        end
+      end
+
+      # Then show new/unscheduled tasks
+      if new_tasks.any?
+        puts "\n  📋 Unscheduled Tasks (by priority):"
+        new_tasks.each_with_index do |task, index|
+          priority_emoji = extract_priority_from_notes(task.notes)
+          priority_text = priority_emoji || "○"
+          puts "    #{due_tasks.length + index + 1}. #{priority_text} #{task.title} (No due date)"
+        end
       end
       puts
 
