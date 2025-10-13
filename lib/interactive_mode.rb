@@ -437,7 +437,7 @@ class InteractiveMode
                           @current_list[:title]
                         end
 
-    puts "📅 Starting Daily Agenda Time-Blocking"
+    puts "📅 Starting Category-Based Agenda Planning"
     puts "List: #{working_list_title}"
     puts "=" * 60
     puts
@@ -446,7 +446,7 @@ class InteractiveMode
       # Step 1: Find all tasks scheduled for today
       puts "📋 Gathering today's tasks..."
       all_tasks = @client.list_tasks(working_list_id, show_completed: false)
-      
+
       today = Date.today
       todays_tasks = all_tasks.select do |task|
         if task.due.nil?
@@ -467,273 +467,177 @@ class InteractiveMode
         return
       end
 
-      puts "Found #{todays_tasks.length} task#{'s' if todays_tasks.length != 1} for today:"
-      todays_tasks.each_with_index do |task, index|
-        # Extract priority from notes
-        priority_emoji = extract_priority_from_notes(task.notes)
-        priority_text = priority_emoji || "○"
-        puts "  #{index + 1}. #{priority_text} #{task.title}"
+      puts "Found #{todays_tasks.length} task#{'s' if todays_tasks.length != 1} for today."
+      puts
+
+      # Step 2: Group tasks by category (department) and priority
+      grouped_tasks = group_tasks_by_category_and_priority(todays_tasks)
+
+      # Show grouped tasks
+      puts "📊 Tasks grouped by category and priority:"
+      grouped_tasks.each do |category, priority_groups|
+        puts "\n#{category}:"
+        priority_groups.each do |priority, tasks|
+          puts "  #{priority}:"
+          tasks.each_with_index do |task, idx|
+            puts "    #{idx + 1}. #{task.title}"
+          end
+        end
       end
       puts
 
-      # Step 2: Sort tasks by priority (Hot > Must > Nice > NotNow > No priority)
-      sorted_tasks = sort_tasks_by_priority(todays_tasks)
+      # Step 3: Process each category (ordered by priority within each category)
+      scheduled_events = []
 
-      puts "📊 Tasks ordered by priority:"
-      sorted_tasks.each_with_index do |task, index|
-        priority_emoji = extract_priority_from_notes(task.notes)
-        priority_text = priority_emoji || "○"
-        puts "  #{index + 1}. #{priority_text} #{task.title}"
-      end
-      puts
+      grouped_tasks.each do |category, priority_groups|
+        puts "\n" + "=" * 60
+        puts "🏷️  Processing Category: #{category}"
+        puts "=" * 60
 
-      # Step 3: Calculate time slots starting from current time (rounded to next 30-min)
-      current_time = Time.now
-      
-      # Round up to the next 30-minute mark
-      start_time = if current_time.min < 30
-                     Time.new(current_time.year, current_time.month, current_time.day, current_time.hour, 30, 0)
-                   else
-                     Time.new(current_time.year, current_time.month, current_time.day, current_time.hour + 1, 0, 0)
-                   end
-
-      puts "⏰ Scheduling tasks in 30-minute time blocks starting from #{start_time.strftime('%H:%M')}"
-      puts "-" * 60
-
-      # Step 4: Schedule tasks in 30-minute slots
-      scheduled_tasks = []
-      slot_index = 0  # Track actual time slots used (doesn't increment for skipped tasks)
-      
-      sorted_tasks.each_with_index do |task, task_index|
-        slot_start = start_time + (slot_index * 30 * 60)  # Add 30 minutes for each USED slot
-        slot_end = slot_start + (30 * 60)  # 30-minute slot
-        
-        priority_emoji = extract_priority_from_notes(task.notes)
-        priority_text = priority_emoji || "○"
-        
-        puts "\n📋 Time Slot #{slot_index + 1}: #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}"
-        puts "Task: #{priority_text} #{task.title}"
-        
-        if task.notes && !task.notes.empty?
-          # Show only classification line, not full notes
-          classification = task.notes.split("\n").first
-          puts "Classification: #{classification}" if classification && classification.length < 100
+        # Flatten priority groups to process tasks by priority order
+        category_tasks = []
+        ['🔥Hot', '🟢Must', '🟠Nice', '🔴NotNow', 'No Priority'].each do |priority|
+          if priority_groups[priority]
+            category_tasks.concat(priority_groups[priority])
+          end
         end
 
-        # Ask user if they want to schedule this task for this time slot
+        # Step 4: Ask about 2-minute rule for each task
+        tasks_to_schedule = []
+
+        category_tasks.each_with_index do |task, idx|
+          priority_emoji = extract_priority_from_notes(task.notes)
+          priority_text = priority_emoji || "○"
+
+          puts "\n📋 Task #{idx + 1} of #{category_tasks.length}: #{priority_text} #{task.title}"
+
+          unless $stdin.tty?
+            # In non-TTY mode, assume all tasks need scheduling
+            confirm = 'n'
+            puts "Does this take less than 2 minutes? (y/N): #{confirm}"
+          else
+            print "Does this take less than 2 minutes? (y/N): "
+            confirm = $stdin.gets.chomp.strip.downcase
+          end
+
+          if confirm == 'y' || confirm == 'yes'
+            puts "⏭️  Task takes less than 2 minutes - ignoring for time-blocking"
+          else
+            tasks_to_schedule << task
+            puts "✅ Added to scheduling queue"
+          end
+        end
+
+        # Step 5: If no tasks to schedule for this category, skip
+        if tasks_to_schedule.empty?
+          puts "\n⏭️  No tasks to schedule for category: #{category}"
+          next
+        end
+
+        # Step 6: Calculate time block duration (30 min per task)
+        num_tasks = tasks_to_schedule.length
+        duration_minutes = num_tasks * 30
+        hours = duration_minutes / 60
+        minutes = duration_minutes % 60
+        duration_text = hours > 0 ? "#{hours}h #{minutes}min" : "#{minutes}min"
+
+        puts "\n📅 Time Block Summary for #{category}:"
+        puts "   Tasks to schedule: #{num_tasks}"
+        puts "   Total duration: #{duration_text} (30 min per task)"
+        puts
+
+        # Step 7: Build calendar event content
+        event_title = "#{num_tasks} task#{num_tasks > 1 ? 's' : ''} for #{category}"
+        event_description = build_category_event_description(tasks_to_schedule, category)
+
+        # Step 8: Ask user for scheduling time
         unless $stdin.tty?
-          # In non-TTY mode, auto-accept
-          puts "Auto-scheduling task for this time slot."
-          confirm = 'y'
+          # In non-TTY mode, auto-schedule starting from next half-hour
+          current_time = Time.now
+          slot_start = if current_time.min < 30
+                        Time.new(current_time.year, current_time.month, current_time.day, current_time.hour, 30, 0)
+                      else
+                        Time.new(current_time.year, current_time.month, current_time.day, current_time.hour + 1, 0, 0)
+                      end
+          puts "Schedule this block starting at #{slot_start.strftime('%H:%M')}? (HH:MM or Enter for #{slot_start.strftime('%H:%M')}): #{slot_start.strftime('%H:%M')}"
         else
-          puts "Options: y=schedule, n=no, s=skip, c=complete task now, or enter time (e.g. 14:30)"
-          print "Schedule this task for #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}? (y/n/s/c/HH:MM): "
-          confirm = $stdin.gets.chomp.strip
+          current_time = Time.now
+          suggested_time = if current_time.min < 30
+                            Time.new(current_time.year, current_time.month, current_time.day, current_time.hour, 30, 0)
+                          else
+                            Time.new(current_time.year, current_time.month, current_time.day, current_time.hour + 1, 0, 0)
+                          end
+
+          print "Schedule this block starting at what time? (HH:MM or Enter for #{suggested_time.strftime('%H:%M')}): "
+          time_input = $stdin.gets.chomp.strip
+
+          if time_input.empty?
+            slot_start = suggested_time
+          else
+            slot_start = parse_custom_time(time_input)
+            unless slot_start
+              puts "❌ Invalid time format. Skipping this category."
+              next
+            end
+          end
         end
 
-        # Check if user entered a custom time
-        custom_time = parse_custom_time(confirm)
-        
-        case 
-        when confirm.downcase == 'y' || confirm.downcase == 'yes' || confirm == ''
-          calendar_event = nil
-          
-          # Hybrid approach: Keep task in Google Tasks, create calendar event for time slot
-          begin
-            # Ensure calendar authentication
-            puts "Checking calendar authentication..." if ENV['DEBUG']
-            @calendar_client.ensure_authenticated
-            
-            # Create calendar event for this time slot
-            puts "Creating calendar event for time slot..." if ENV['DEBUG']
-            calendar_event = @calendar_client.create_task_event(
-              task.title,
-              slot_start,
-              slot_end,
-              task.notes,
-              task.id,
-              list_id
-            )
-            
-            puts "Calendar event created successfully!" if ENV['DEBUG']
-            puts "Event link: #{calendar_event.html_link}" if ENV['DEBUG']
-            
-          rescue => e
-            puts "❌ Error creating calendar event: #{e.message}"
-            puts "📋 Task will remain in Google Tasks without calendar integration."
-            puts "🔍 Debug: Calendar error - #{e.class}: #{e.message}" if ENV['DEBUG']
-            calendar_event = nil
-          end
-          
-          # Update task with specific time from the agenda slot to avoid "all day" appearance
-          # IMPORTANT: Preserve existing task title and notes when updating due date
-          specific_due_time = slot_start.strftime('%Y-%m-%dT%H:%M:%S.000Z')
-          begin
-            puts "Updating task due date to specific time: #{specific_due_time}" if ENV['DEBUG']
-            puts "Preserving task title: #{task.title}" if ENV['DEBUG']
-            puts "Preserving task notes: #{task.notes}" if ENV['DEBUG']
-            
-            @client.update_task(list_id, task.id, 
-                               title: task.title,
-                               notes: task.notes,
-                               due: specific_due_time)
-            puts "Task due date updated successfully to #{specific_due_time}" if ENV['DEBUG']
-          rescue => update_error
-            puts "❌ Warning: Could not update task due date: #{update_error.message}"
-            puts "🔍 Debug: Task update error - #{update_error.class}: #{update_error.message}" if ENV['DEBUG']
-          end
-          
-          # Calendar event created, task due date updated with specific time
-          if ENV['DEBUG']
-            puts "Task due date updated with specific time, calendar event provides time-blocking"
-          end
-          
-          scheduled_tasks << {
-            task: task,
+        slot_end = slot_start + (duration_minutes * 60)
+
+        puts "\n📅 Creating calendar event:"
+        puts "   Title: #{event_title}"
+        puts "   Time: #{slot_start.strftime('%H:%M')} - #{slot_end.strftime('%H:%M')}"
+        puts "   Duration: #{duration_text}"
+
+        # Step 9: Create calendar event
+        begin
+          @calendar_client.ensure_authenticated
+
+          # Create a single calendar event for all tasks in this category
+          calendar_event = create_category_calendar_event(
+            event_title,
+            slot_start,
+            slot_end,
+            event_description,
+            working_list_id
+          )
+
+          puts "✅ Calendar event created successfully!"
+
+          scheduled_events << {
+            category: category,
+            num_tasks: num_tasks,
             time_slot: "#{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')}",
             start_time: slot_start,
-            calendar_event: calendar_event
+            duration: duration_text,
+            tasks: tasks_to_schedule
           }
-          
-          puts "✅ Scheduled: #{task.title}"
-          puts "   📋 Google Tasks: Due #{slot_start.strftime('%H:%M')}"
-          calendar_status = calendar_event ? "✅ Created" : "❌ Failed"
-          puts "   📅 Google Calendar: #{slot_start.strftime('%H:%M')}-#{slot_end.strftime('%H:%M')} #{calendar_status}"
-          
-          # Increment slot_index only when a task is actually scheduled
-          slot_index += 1
-          
-        when confirm.downcase == 's' || confirm.downcase == 'skip'
-          puts "⏭️  Skipped: #{task.title} (time slot will be reused)"
-          # Don't increment slot_index - next task will use the same time slot
-          
-        when confirm.downcase == 'c' || confirm.downcase == 'complete'
-          # Mark task as completed and reuse time slot
-          begin
-            puts "Marking task as completed..." if ENV['DEBUG']
-            @client.complete_task(list_id, task.id)
-            puts "✅ Completed: #{task.title} (time slot will be reused)"
-            puts "   📋 Google Tasks: Marked as completed"
-            puts "   📅 Google Calendar: No event created"
-          rescue => complete_error
-            puts "❌ Error completing task: #{complete_error.message}"
-            puts "⏭️  Skipped instead: #{task.title} (time slot will be reused)"
-          end
-          # Don't increment slot_index - next task will use the same time slot
-          
-        when custom_time
-          # User entered a custom time - ask for duration
-          duration_minutes = get_duration_choice
-          
-          if duration_minutes
-            custom_slot_end = custom_time + (duration_minutes * 60)
-            
-            puts "📅 Custom scheduling: #{custom_time.strftime('%H:%M')}-#{custom_slot_end.strftime('%H:%M')} (#{duration_minutes}min)"
-            print "Confirm custom time slot? (y/n): "
-            time_confirm = $stdin.gets.chomp.strip.downcase
-            
-            if time_confirm == 'y' || time_confirm == 'yes' || time_confirm == ''
-              calendar_event = nil
-              
-              # Create calendar event for custom time slot
-              begin
-                puts "Checking calendar authentication..." if ENV['DEBUG']
-                @calendar_client.ensure_authenticated
-                
-                puts "Creating calendar event for custom time slot..." if ENV['DEBUG']
-                calendar_event = @calendar_client.create_task_event(
-                  task.title,
-                  custom_time,
-                  custom_slot_end,
-                  task.notes,
-                  task.id,
-                  list_id
-                )
-                
-                puts "Calendar event created successfully!" if ENV['DEBUG']
-                puts "Event link: #{calendar_event.html_link}" if ENV['DEBUG']
-                
-              rescue => e
-                puts "❌ Error creating calendar event: #{e.message}"
-                puts "📋 Task will remain in Google Tasks without calendar integration."
-                puts "🔍 Debug: Calendar error - #{e.class}: #{e.message}" if ENV['DEBUG']
-                calendar_event = nil
-              end
-              
-              # Update task with custom time
-              custom_due_time = custom_time.strftime('%Y-%m-%dT%H:%M:%S.000Z')
-              begin
-                puts "Updating task due date to custom time: #{custom_due_time}" if ENV['DEBUG']
-                puts "Preserving task title: #{task.title}" if ENV['DEBUG']
-                puts "Preserving task notes: #{task.notes}" if ENV['DEBUG']
-                
-                @client.update_task(list_id, task.id, 
-                                   title: task.title,
-                                   notes: task.notes,
-                                   due: custom_due_time)
-                puts "Task due date updated successfully to #{custom_due_time}" if ENV['DEBUG']
-              rescue => update_error
-                puts "❌ Warning: Could not update task due date: #{update_error.message}"
-                puts "🔍 Debug: Task update error - #{update_error.class}: #{update_error.message}" if ENV['DEBUG']
-              end
-              
-              scheduled_tasks << {
-                task: task,
-                time_slot: "#{custom_time.strftime('%H:%M')}-#{custom_slot_end.strftime('%H:%M')}",
-                start_time: custom_time,
-                calendar_event: calendar_event
-              }
-              
-              puts "✅ Custom Scheduled: #{task.title}"
-              puts "   📋 Google Tasks: Due #{custom_time.strftime('%H:%M')}"
-              calendar_status = calendar_event ? "✅ Created" : "❌ Failed"
-              puts "   📅 Google Calendar: #{custom_time.strftime('%H:%M')}-#{custom_slot_end.strftime('%H:%M')} #{calendar_status}"
-              
-              # Don't increment slot_index - this task used a custom time, not the current slot
-            else
-              puts "❌ Custom time cancelled: #{task.title} (time slot will be reused)"
-            end
-          else
-            puts "❌ Duration selection cancelled: #{task.title} (time slot will be reused)"
-          end
-          
-        when confirm.downcase == 'n' || confirm.downcase == 'no'
-          puts "❌ Not scheduled: #{task.title} (time slot will be reused)"
-          # Don't increment slot_index - next task will use the same time slot
-          
-        else
-          puts "❌ Invalid input '#{confirm}': #{task.title} (time slot will be reused)"
-          puts "Valid options: y, n, s, c, or time format like 14:30"
-          # Don't increment slot_index - next task will use the same time slot
+
+        rescue => e
+          puts "❌ Error creating calendar event: #{e.message}"
+          puts "🔍 Debug: #{e.class}: #{e.message}" if ENV['DEBUG']
         end
       end
 
-      # Step 5: Show final agenda summary
-      if scheduled_tasks.any?
+      # Step 10: Show final agenda summary
+      if scheduled_events.any?
         puts "\n" + "=" * 80
-        puts "📅 TODAY'S HYBRID AGENDA SUMMARY"
+        puts "📅 TODAY'S CATEGORY-BASED AGENDA SUMMARY"
         puts "=" * 80
-        
-        puts "📋 Google Tasks: Due dates updated with specific times"
-        puts "📅 Google Calendar: Time-blocked schedule below"
         puts
-        
-        scheduled_tasks.each do |item|
-          priority_emoji = extract_priority_from_notes(item[:task].notes)
-          priority_text = priority_emoji || "○"
-          calendar_status = item[:calendar_event] ? "📅" : "⚠️"
-          puts "#{item[:time_slot]} | #{priority_text} #{item[:task].title} #{calendar_status}"
+
+        scheduled_events.sort_by { |e| e[:start_time] }.each do |event|
+          puts "#{event[:time_slot]} | #{event[:num_tasks]} task#{event[:num_tasks] > 1 ? 's' : ''} for #{event[:category]} (#{event[:duration]})"
         end
-        
-        puts "\n🎯 Hybrid approach activated! #{scheduled_tasks.length} task#{'s' if scheduled_tasks.length != 1} scheduled."
-        puts "📋 Tasks updated in Google Tasks with specific due times"
-        puts "📅 Calendar events created for precise time-blocking"
-        puts "💡 Tip: Both platforms now show specific times (no more 'all day')"
+
+        total_tasks = scheduled_events.sum { |e| e[:num_tasks] }
+        puts "\n🎯 Category-based agenda complete! #{scheduled_events.length} time block#{scheduled_events.length > 1 ? 's' : ''} created for #{total_tasks} task#{total_tasks > 1 ? 's' : ''}."
+        puts "📅 Check your Google Calendar for the scheduled blocks"
+        puts "💡 Tip: Each block groups related tasks by category for efficient context switching"
       else
-        puts "\n📝 No tasks were scheduled for specific times."
-        puts "All tasks remain with their original due dates."
+        puts "\n📝 No time blocks were scheduled."
       end
-      
+
       puts
 
     rescue => e
@@ -1077,7 +981,7 @@ class InteractiveMode
 
   def extract_priority_from_notes(notes)
     return nil unless notes
-    
+
     case notes
     when /🔥/
       '🔥Hot'
@@ -1090,6 +994,109 @@ class InteractiveMode
     else
       nil
     end
+  end
+
+  def extract_category_from_notes(notes)
+    return 'No Category' unless notes
+
+    case notes
+    when /🧩/
+      '🧩Product'
+    when /📈/
+      '📈Business'
+    when /📢/
+      '📢Marketing'
+    when /🔒/
+      '🔒Security'
+    when /💰/
+      '💰Finance'
+    when /💳/
+      '💳Sales'
+    when /🎧/
+      '🎧Support'
+    when /👩‍💼/
+      '👩‍💼Others'
+    else
+      'No Category'
+    end
+  end
+
+  def group_tasks_by_category_and_priority(tasks)
+    # Group tasks by category first
+    grouped = {}
+
+    tasks.each do |task|
+      category = extract_category_from_notes(task.notes)
+      priority = extract_priority_from_notes(task.notes) || 'No Priority'
+
+      grouped[category] ||= {}
+      grouped[category][priority] ||= []
+      grouped[category][priority] << task
+    end
+
+    # Sort categories by priority weight (highest priority category first)
+    sorted_grouped = grouped.sort_by do |category, priority_groups|
+      # Calculate the highest priority weight in this category
+      max_weight = priority_groups.keys.map { |p| get_priority_weight_from_text(p) }.max || 0
+      -max_weight  # Negative for descending order
+    end.to_h
+
+    sorted_grouped
+  end
+
+  def get_priority_weight_from_text(priority_text)
+    case priority_text
+    when '🔥Hot'
+      4
+    when '🟢Must'
+      3
+    when '🟠Nice'
+      2
+    when '🔴NotNow'
+      1
+    else
+      0  # No priority
+    end
+  end
+
+  def build_category_event_description(tasks, category)
+    description = "🏷️  Category: #{category}\n"
+    description += "📋 Tasks in this block (#{tasks.length}):\n\n"
+
+    tasks.each_with_index do |task, idx|
+      priority_emoji = extract_priority_from_notes(task.notes)
+      priority_text = priority_emoji || "○"
+      description += "#{idx + 1}. #{priority_text} #{task.title}\n"
+    end
+
+    description += "\n⏰ Estimated time: #{tasks.length * 30} minutes (30 min per task)\n"
+    description += "\n💡 Created by GTD Task Manager - Category Time Blocking"
+    description
+  end
+
+  def create_category_calendar_event(title, start_time, end_time, description, list_id)
+    @calendar_client.ensure_authenticated
+
+    event = Google::Apis::CalendarV3::Event.new
+    event.summary = title
+    event.description = description
+
+    # Set start time - use UTC format
+    event.start = Google::Apis::CalendarV3::EventDateTime.new
+    event.start.date_time = start_time.utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+
+    # Set end time - use UTC format
+    event.end = Google::Apis::CalendarV3::EventDateTime.new
+    event.end.date_time = end_time.utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+
+    event.color_id = '10'  # Green color for category blocks
+
+    calendar_service = Google::Apis::CalendarV3::CalendarService.new
+    calendar_service.authorization = @calendar_client.instance_variable_get(:@service).authorization
+
+    result = calendar_service.insert_event('primary', event)
+    puts "Created category calendar event: #{result.html_link}" if ENV['DEBUG']
+    result
   end
 
   def sort_tasks_by_priority(tasks)
@@ -1480,7 +1487,7 @@ class InteractiveMode
       puts "  search <text>          - Search for uncompleted tasks containing text"
       puts "  plan <task_id>         - Quickly schedule task (today, tomorrow, next week, etc.)"
       puts "  review <task_id>       - Review and classify task with priority/department"
-      puts "  agenda                 - Time-block today's tasks in 30-min slots starting from now (ordered by priority)"
+      puts "  agenda                 - Category-based time-blocking with 2-minute rule filtering"
       puts "  grooming               - GTD workflow: review unclassified tasks then schedule all overdue/unscheduled tasks"
       puts "  recap [date]           - Review uncompleted tasks and create follow-up tasks for delegated items (today/yesterday/YYYY-MM-DD)"
     else
@@ -1494,7 +1501,7 @@ class InteractiveMode
       puts "  search <text>          - Search for uncompleted tasks containing text"
       puts "  plan <task_id>         - Quickly schedule task (today, tomorrow, next week, etc.)"
       puts "  review <task_id>       - Review and classify task with priority/department"
-      puts "  agenda                 - Time-block today's tasks in 30-min slots starting from now (ordered by priority)"
+      puts "  agenda                 - Category-based time-blocking with 2-minute rule filtering"
       puts "  grooming               - GTD workflow: review unclassified tasks then schedule all overdue/unscheduled tasks"
       puts "  recap [date]           - Review uncompleted tasks and create follow-up tasks for delegated items (today/yesterday/YYYY-MM-DD)"
     end
