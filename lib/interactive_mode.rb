@@ -742,6 +742,174 @@ class InteractiveMode
     end
   end
 
+  def recap_workflow(list_id = nil, date_arg = nil)
+    # Use provided list_id or current list
+    working_list_id = list_id || @current_list[:id]
+    working_list_title = if list_id
+                          list = @client.get_task_list(list_id)
+                          list.title
+                        else
+                          @current_list[:title]
+                        end
+
+    # Parse date argument
+    target_date = parse_recap_date(date_arg)
+    return unless target_date
+
+    puts "📋 Starting Recap for Delegated Follow-ups"
+    puts "List: #{working_list_title}"
+    puts "Date: #{target_date.strftime('%A, %B %d, %Y')}"
+    puts "=" * 60
+    puts
+
+    begin
+      # Step 1: Find all uncompleted tasks with due dates on or before the target date
+      puts "🔍 Gathering uncompleted tasks from #{target_date.strftime('%m/%d/%Y')} and earlier..."
+      all_tasks = @client.list_tasks(working_list_id, show_completed: false)
+
+      # Filter tasks that were due on or before the target date
+      target_tasks = all_tasks.select do |task|
+        if task.due
+          begin
+            due_date = Time.parse(task.due).to_date
+            due_date <= target_date
+          rescue
+            false
+          end
+        else
+          false
+        end
+      end
+
+      if target_tasks.empty?
+        puts "📭 No uncompleted tasks found with due dates on or before #{target_date.strftime('%A, %B %d, %Y')}"
+        puts "Try checking a different date or use the grooming command for unscheduled tasks."
+        return
+      end
+
+      puts "Found #{target_tasks.length} uncompleted task#{'s' if target_tasks.length != 1} due on/before #{target_date.strftime('%m/%d/%Y')}:"
+      target_tasks.each_with_index do |task, index|
+        status_icon = '○'
+        due_info = task.due ? " (Due: #{Time.parse(task.due).strftime('%m/%d')})" : ""
+        puts "  #{index + 1}. #{status_icon} #{task.title}#{due_info}"
+      end
+      puts
+
+      # Step 2: Review each task for follow-up needs
+      puts "📝 FOLLOW-UP REVIEW: Checking each task for delegation follow-ups"
+      puts "-" * 60
+
+      follow_ups_created = 0
+
+      target_tasks.each_with_index do |task, index|
+        puts "\n🔍 Reviewing task #{index + 1} of #{target_tasks.length}:"
+        puts "Title: #{task.title}"
+        puts "Due: #{task.due ? Time.parse(task.due).strftime('%Y-%m-%d %H:%M') : 'No due date'}"
+
+        if task.notes && !task.notes.empty?
+          puts "Notes: #{task.notes}"
+        end
+        puts
+
+        # Ask if this task needs follow-up
+        unless $stdin.tty?
+          # In non-TTY mode, skip for demo
+          puts "⏭️  Skipped (non-interactive mode)"
+          next
+        end
+
+        print "Is this task waiting for something from someone else? (y/N): "
+        needs_followup = $stdin.gets.chomp.strip.downcase
+
+        if needs_followup == 'y' || needs_followup == 'yes'
+          # Collect follow-up information
+          print "What are you expecting to receive? (e.g., 'Report from client', 'Approval from manager'): "
+          expected_item = $stdin.gets.chomp.strip
+
+          if expected_item.empty?
+            puts "⏭️  Follow-up cancelled (no item specified)"
+            next
+          end
+
+          print "From whom are you expecting it? (e.g., 'John Smith', 'Client team', 'HR department'): "
+          from_whom = $stdin.gets.chomp.strip
+
+          if from_whom.empty?
+            puts "⏭️  Follow-up cancelled (no person/team specified)"
+            next
+          end
+
+          # Create the follow-up task
+          begin
+            followup_title = "Follow up: #{expected_item}"
+
+            # Build comprehensive notes with link to original task
+            followup_notes = "📋 FOLLOW-UP TASK\n\n"
+            followup_notes += "Expecting: #{expected_item}\n"
+            followup_notes += "From: #{from_whom}\n"
+            followup_notes += "Original task due: #{task.due ? Time.parse(task.due).strftime('%Y-%m-%d') : 'No due date'}\n"
+            followup_notes += "Recap date: #{target_date.strftime('%Y-%m-%d')}\n\n"
+            followup_notes += "🔗 REFERENCE\n"
+            followup_notes += "Original task: \"#{task.title}\"\n"
+            followup_notes += "Task ID: #{task.id}\n"
+            followup_notes += "List: #{working_list_title}\n"
+
+            if task.notes && !task.notes.empty?
+              followup_notes += "\nOriginal notes:\n#{task.notes}"
+            end
+
+            # Set follow-up for appropriate time based on urgency
+            if target_date == Date.today
+              # If recapping today, schedule follow-up for tomorrow
+              followup_due = (Date.today + 1)
+              followup_time = Time.new(followup_due.year, followup_due.month, followup_due.day, 9, 0, 0).utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+            else
+              # If recapping past dates, schedule for next Monday
+              followup_time = next_week_monday(9).utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+            end
+
+            # Create the follow-up task
+            new_task = @client.create_task(working_list_id, followup_title,
+                                         notes: followup_notes,
+                                         due: followup_time)
+
+            puts "✅ Follow-up task created:"
+            puts "   Title: #{followup_title}"
+            puts "   Due: #{Time.parse(followup_time).strftime('%A, %B %d, %Y at %H:%M')}"
+            puts "   Expecting: #{expected_item} from #{from_whom}"
+            puts "   ID: #{new_task.id}"
+
+            follow_ups_created += 1
+
+          rescue => e
+            puts "❌ Error creating follow-up task: #{e.message}"
+          end
+        else
+          puts "⏭️  No follow-up needed for this task"
+        end
+
+        puts
+      end
+
+      # Summary
+      puts "🎉 Recap completed!"
+      puts "Reviewed #{target_tasks.length} uncompleted task#{'s' if target_tasks.length != 1}"
+      puts "Created #{follow_ups_created} follow-up task#{'s' if follow_ups_created != 1}"
+
+      if follow_ups_created > 0
+        puts "\n💡 Tips for managing follow-ups:"
+        puts "• Use 'search follow' to find all follow-up tasks"
+        puts "• Mark original tasks as complete once follow-ups are resolved"
+        puts "• Review follow-ups regularly to stay on top of delegated work"
+      end
+      puts
+
+    rescue => e
+      puts "Error during recap workflow: #{e.message}"
+      puts e.backtrace.first(3).join("\n") if ENV['DEBUG']
+    end
+  end
+
   def debug_task_in_current_list(args)
     return puts "Usage: debug <task_id_or_number>" if args.nil? || args.empty?
 
@@ -752,7 +920,7 @@ class InteractiveMode
     begin
       puts "Fetching detailed task information..."
       task = @client.get_task(@current_list[:id], task_id)
-      
+
       puts "\n=== COMPLETE TASK ANALYSIS ==="
       puts "Task ID: #{task.id}"
       puts "Title: #{task.title}"
@@ -762,23 +930,23 @@ class InteractiveMode
       puts "Completed: #{task.completed || '(none)'}"
       puts "Updated: #{task.updated || '(none)'}"
       puts
-      
+
       puts "=== TASK OBJECT DETAILS ==="
       puts "Class: #{task.class}"
       puts
-      
+
       puts "=== ALL AVAILABLE METHODS ==="
       relevant_methods = task.methods.select { |m| !m.to_s.start_with?('_') && m.to_s.length < 20 }
       relevant_methods.sort.each { |method| puts "  #{method}" }
       puts
-      
+
       puts "=== INSTANCE VARIABLES ==="
       task.instance_variables.each do |var|
         value = task.instance_variable_get(var)
         puts "  #{var}: #{value.inspect}"
       end
       puts
-      
+
       puts "=== TASK AS HASH ==="
       if task.respond_to?(:to_h)
         task.to_h.each do |key, value|
@@ -788,11 +956,11 @@ class InteractiveMode
         puts "Task doesn't respond to :to_h"
       end
       puts
-      
+
       puts "=== RAW INSPECTION ==="
       puts task.inspect
       puts "=========================="
-      
+
     rescue => e
       puts "Error debugging task: #{e.message}"
       puts e.backtrace.first(3).join("\n") if ENV['DEBUG']
@@ -1070,27 +1238,59 @@ class InteractiveMode
     end
   end
 
+  def parse_recap_date(date_arg)
+    case date_arg&.strip&.downcase
+    when nil, '', 'today'
+      Date.today
+    when 'yesterday'
+      Date.today - 1
+    else
+      begin
+        Date.parse(date_arg)
+      rescue ArgumentError
+        puts "❌ Invalid date format: #{date_arg}"
+        puts "Supported formats: 'today', 'yesterday', or YYYY-MM-DD (e.g., 2025-01-15)"
+        return nil
+      end
+    end
+  end
+
+  def next_week_monday(hour = 9)
+    today = Date.today
+    current_wday = today.wday # 0=Sunday, 1=Monday, ..., 6=Saturday
+
+    # Calculate days to next Monday
+    if current_wday == 0 # Sunday
+      days_to_add = 1
+    else
+      days_to_add = 8 - current_wday # Days until next Monday
+    end
+
+    target_date = today + days_to_add
+    Time.new(target_date.year, target_date.month, target_date.day, hour, 0, 0)
+  end
+
   def next_weekday(target_wday, hour = 9)
     # target_wday: 1=Monday, 2=Tuesday, ..., 5=Friday
     today = Date.today
     current_wday = today.wday # 0=Sunday, 1=Monday, ..., 6=Saturday
-    
+
     # Convert Sunday=0 to Sunday=7 for easier calculation
     current_wday = 7 if current_wday == 0
     target_wday = 7 if target_wday == 0
-    
+
     # Calculate days to add
     if current_wday < target_wday
       days_to_add = target_wday - current_wday
     else
       days_to_add = 7 - current_wday + target_wday
     end
-    
+
     # If it's the same weekday and it's already past the hour, go to next week
     if current_wday == target_wday && Time.now.hour >= hour
       days_to_add = 7
     end
-    
+
     target_date = today + days_to_add
     Time.new(target_date.year, target_date.month, target_date.day, hour, 0, 0)
   end
@@ -1243,6 +1443,12 @@ class InteractiveMode
       else
         puts "Error: No list context set. Use 'use <list_name>' first."
       end
+    when 'recap'
+      if @current_context == :list
+        recap_workflow(@current_list[:id], args)
+      else
+        puts "Error: No list context set. Use 'use <list_name>' first."
+      end
     else
       puts "Unknown command: #{command}. Type 'help' for available commands."
     end
@@ -1276,6 +1482,7 @@ class InteractiveMode
       puts "  review <task_id>       - Review and classify task with priority/department"
       puts "  agenda                 - Time-block today's tasks in 30-min slots starting from now (ordered by priority)"
       puts "  grooming               - GTD workflow: review unclassified tasks then schedule all overdue/unscheduled tasks"
+      puts "  recap [date]           - Review uncompleted tasks and create follow-up tasks for delegated items (today/yesterday/YYYY-MM-DD)"
     else
       puts "List context commands (available when in a list context):"
       puts "  tasks, list [--completed] [--limit N] - Show tasks in current list"
@@ -1289,6 +1496,7 @@ class InteractiveMode
       puts "  review <task_id>       - Review and classify task with priority/department"
       puts "  agenda                 - Time-block today's tasks in 30-min slots starting from now (ordered by priority)"
       puts "  grooming               - GTD workflow: review unclassified tasks then schedule all overdue/unscheduled tasks"
+      puts "  recap [date]           - Review uncompleted tasks and create follow-up tasks for delegated items (today/yesterday/YYYY-MM-DD)"
     end
     puts
   end

@@ -19,12 +19,14 @@ This is a Ruby-based Google Tasks client that implements Getting Things Done (GT
 - `review <task_id>` - Review and classify task with priority/department
 - `agenda` - **NEW**: Time-block today's tasks in 30-min slots starting from now (ordered by priority)
 - `grooming` - **NEW**: GTD workflow for reviewing and scheduling tasks
+- `recap [date]` - **NEW**: Review uncompleted tasks and create follow-up tasks for delegated items
 
 ### Console Commands
 - `./bin/tasker lists`
 - `./bin/tasker tasks LIST_ID`
 - `./bin/tasker agenda LIST_ID` - **NEW**: Time-block today's tasks in 30-minute slots
 - `./bin/tasker grooming LIST_ID` - **NEW**: GTD grooming workflow
+- `./bin/tasker recap LIST_ID [date]` - **NEW**: Review uncompleted tasks and create follow-up tasks
 
 ## NEW: Hybrid Agenda Time-Blocking Feature
 
@@ -178,6 +180,111 @@ Current due date: (none)
 
 🎉 GTD Grooming completed!
 All 5 tasks have been processed.
+```
+
+## NEW: Recap Feature for Delegation Follow-ups
+
+### What it does
+The `recap` command implements a delegation follow-up workflow for uncompleted tasks:
+
+1. **Finds uncompleted tasks**: All tasks with due dates on or before a specific date (today, yesterday, or custom date)
+2. **Reviews each task**: Asks if any task is waiting for something from someone else
+3. **Creates follow-up tasks**: For delegated items, creates new tasks with:
+   - What you're expecting to receive
+   - From whom you're expecting it
+   - Link back to the original task
+   - Automatically scheduled (tomorrow for today's recap, next Monday for past dates)
+
+### Usage Examples
+
+**Interactive Mode:**
+```bash
+# After selecting a list with 'use <list_name>'
+recap                    # Review today's uncompleted tasks
+recap yesterday         # Review yesterday's uncompleted tasks
+recap 2025-01-15       # Review specific date's uncompleted tasks
+```
+
+**Console Mode:**
+```bash
+./bin/tasker recap LIST_ID              # Today's uncompleted tasks
+./bin/tasker recap LIST_ID yesterday    # Yesterday's uncompleted tasks
+./bin/tasker recap LIST_ID 2025-01-15  # Specific date's uncompleted tasks
+```
+
+### Expected Output Flow
+```
+📋 Starting Recap for Delegated Follow-ups
+List: My Task List
+Date: Monday, September 16, 2025
+============================================================
+
+🔍 Gathering uncompleted tasks from 09/16/2025 and earlier...
+Found 3 uncompleted tasks due on/before 09/16/2025:
+  1. ○ Wait for proposal feedback (Due: 09/15)
+  2. ○ Follow up on budget request (Due: 09/16)
+  3. ○ Review contract draft (Due: 09/14)
+
+📝 FOLLOW-UP REVIEW: Checking each task for delegation follow-ups
+------------------------------------------------------------
+
+🔍 Reviewing task 1 of 3:
+Title: Wait for proposal feedback
+Due: 2025-09-15 09:00
+Notes: 🟢Must 📈Business
+
+Is this task waiting for something from someone else? (y/N): y
+What are you expecting to receive? (e.g., 'Report from client', 'Approval from manager'): Proposal feedback and decision
+From whom are you expecting it? (e.g., 'John Smith', 'Client team', 'HR department'): Client ABC Corp
+
+✅ Follow-up task created:
+   Title: Follow up: Proposal feedback and decision
+   Due: Tuesday, September 17, 2025 at 09:00
+   Expecting: Proposal feedback and decision from Client ABC Corp
+   ID: xyz123
+
+🔍 Reviewing task 2 of 3:
+Title: Follow up on budget request
+Due: 2025-09-16 09:00
+
+Is this task waiting for something from someone else? (y/N): n
+⏭️  No follow-up needed for this task
+
+🎉 Recap completed!
+Reviewed 3 uncompleted tasks
+Created 1 follow-up task
+
+💡 Tips for managing follow-ups:
+• Use 'search follow' to find all follow-up tasks
+• Mark original tasks as complete once follow-ups are resolved
+• Review follow-ups regularly to stay on top of delegated work
+```
+
+### Follow-up Task Structure
+Each follow-up task includes comprehensive notes with:
+- What you're expecting
+- From whom
+- Original task due date
+- Recap date
+- Link to original task (ID and title)
+- Full context from original task notes
+
+Example follow-up task notes:
+```
+📋 FOLLOW-UP TASK
+
+Expecting: Proposal feedback and decision
+From: Client ABC Corp
+Original task due: 2025-09-15
+Recap date: 2025-09-16
+
+🔗 REFERENCE
+Original task: "Wait for proposal feedback"
+Task ID: abc456
+List: My Task List
+
+Original notes:
+🟢Must 📈Business
 ```
 
 ## Authentication Requirements
