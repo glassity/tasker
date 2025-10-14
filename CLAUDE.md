@@ -19,14 +19,14 @@ This is a Ruby-based Google Tasks client that implements Getting Things Done (GT
 - `review <task_id>` - Review and classify task with priority/department
 - `agenda` - **NEW**: Category-based time-blocking with 2-minute rule filtering
 - `grooming` - **NEW**: GTD workflow for reviewing and scheduling tasks
-- `recap [date]` - **NEW**: Review uncompleted tasks and create follow-up tasks for delegated items
+- `recap [date]` - **NEW**: Review day's tasks (completed/incomplete), select by number for follow-ups
 
 ### Console Commands
 - `./bin/tasker lists`
 - `./bin/tasker tasks LIST_ID`
 - `./bin/tasker agenda LIST_ID` - **NEW**: Category-based time-blocking with batched calendar events
 - `./bin/tasker grooming LIST_ID` - **NEW**: GTD grooming workflow
-- `./bin/tasker recap LIST_ID [date]` - **NEW**: Review uncompleted tasks and create follow-up tasks
+- `./bin/tasker recap LIST_ID [date]` - **NEW**: Review day's tasks, select by number for follow-ups
 
 ## NEW: Category-Based Agenda Time-Blocking Feature
 
@@ -230,58 +230,71 @@ Current due date: (none)
 All 5 tasks have been processed.
 ```
 
-## NEW: Recap Feature for Delegation Follow-ups
+## NEW: Recap Feature for Daily Task Review
 
 ### What it does
-The `recap` command implements a delegation follow-up workflow for uncompleted tasks:
+The `recap` command implements a daily task review workflow:
 
-1. **Finds uncompleted tasks**: All tasks with due dates on or before a specific date (today, yesterday, or custom date)
-2. **Reviews each task**: Asks if any task is waiting for something from someone else
-3. **Creates follow-up tasks**: For delegated items, creates new tasks with:
+1. **Shows all tasks for a specific day**: Displays both completed and incomplete tasks with due date matching the target date
+2. **Selective follow-up creation**: User selects tasks by number that need follow-ups (comma-separated list)
+3. **Creates follow-up tasks**: For selected items, creates new tasks with:
    - What you're expecting to receive
    - From whom you're expecting it
    - Link back to the original task
    - Automatically scheduled (tomorrow for today's recap, next Monday for past dates)
+4. **Optional task completion**: After creating each follow-up, asks if the original task should be marked as complete
 
 ### Usage Examples
 
 **Interactive Mode:**
 ```bash
 # After selecting a list with 'use <list_name>'
-recap                    # Review today's uncompleted tasks
-recap yesterday         # Review yesterday's uncompleted tasks
-recap 2025-01-15       # Review specific date's uncompleted tasks
+recap                    # Review today's tasks
+recap yesterday         # Review yesterday's tasks
+recap 2025-01-15       # Review specific date's tasks
 ```
 
 **Console Mode:**
 ```bash
-./bin/tasker recap LIST_ID              # Today's uncompleted tasks
-./bin/tasker recap LIST_ID yesterday    # Yesterday's uncompleted tasks
-./bin/tasker recap LIST_ID 2025-01-15  # Specific date's uncompleted tasks
+./bin/tasker recap LIST_ID              # Today's tasks
+./bin/tasker recap LIST_ID yesterday    # Yesterday's tasks
+./bin/tasker recap LIST_ID 2025-01-15  # Specific date's tasks
 ```
 
 ### Expected Output Flow
 ```
-📋 Starting Recap for Delegated Follow-ups
+📋 Daily Recap Review
 List: My Task List
 Date: Monday, September 16, 2025
 ============================================================
 
-🔍 Gathering uncompleted tasks from 09/16/2025 and earlier...
-Found 3 uncompleted tasks due on/before 09/16/2025:
-  1. ○ Wait for proposal feedback (Due: 09/15)
-  2. ○ Follow up on budget request (Due: 09/16)
-  3. ○ Review contract draft (Due: 09/14)
+🔍 Gathering all tasks for 09/16/2025...
+Found 5 tasks for this day:
 
-📝 FOLLOW-UP REVIEW: Checking each task for delegation follow-ups
+  1. [✓] Complete project documentation 🟢Must
+      Status: Completed
+  2. [○] Wait for proposal feedback 🟢Must
+      Status: Incomplete
+  3. [○] Follow up on budget request 🟠Nice
+      Status: Incomplete
+  4. [✓] Team standup meeting
+      Status: Completed
+  5. [○] Review contract draft 🔥Hot
+      Status: Incomplete
+
+📝 SELECT TASKS FOR FOLLOW-UP
 ------------------------------------------------------------
+Enter the numbers of tasks that need follow-ups (comma-separated)
+Example: 1,3,5 or just press Enter to skip
 
-🔍 Reviewing task 1 of 3:
+Task numbers for follow-up: 2,3
+
+============================================================
+📋 Creating follow-up for task #2:
 Title: Wait for proposal feedback
-Due: 2025-09-15 09:00
+Status: Incomplete
 Notes: 🟢Must 📈Business
 
-Is this task waiting for something from someone else? (y/N): y
 What are you expecting to receive? (e.g., 'Report from client', 'Approval from manager'): Proposal feedback and decision
 From whom are you expecting it? (e.g., 'John Smith', 'Client team', 'HR department'): Client ABC Corp
 
@@ -291,20 +304,34 @@ From whom are you expecting it? (e.g., 'John Smith', 'Client team', 'HR departme
    Expecting: Proposal feedback and decision from Client ABC Corp
    ID: xyz123
 
-🔍 Reviewing task 2 of 3:
+Mark original task 'Wait for proposal feedback' as complete? (y/N): y
+✅ Original task marked as complete
+
+============================================================
+📋 Creating follow-up for task #3:
 Title: Follow up on budget request
-Due: 2025-09-16 09:00
+Status: Incomplete
 
-Is this task waiting for something from someone else? (y/N): n
-⏭️  No follow-up needed for this task
+What are you expecting to receive?: Budget approval
+From whom are you expecting it?: Finance team
 
+✅ Follow-up task created:
+   Title: Follow up: Budget approval
+   Due: Tuesday, September 17, 2025 at 09:00
+   Expecting: Budget approval from Finance team
+   ID: xyz124
+
+Mark original task 'Follow up on budget request' as complete? (y/N): n
+⏭️  Original task remains incomplete
+
+============================================================
 🎉 Recap completed!
-Reviewed 3 uncompleted tasks
-Created 1 follow-up task
+Selected tasks: 2
+Follow-ups created: 2
+Tasks marked complete: 1
 
 💡 Tips for managing follow-ups:
 • Use 'search follow' to find all follow-up tasks
-• Mark original tasks as complete once follow-ups are resolved
 • Review follow-ups regularly to stay on top of delegated work
 ```
 

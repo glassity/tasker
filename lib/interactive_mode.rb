@@ -660,23 +660,27 @@ class InteractiveMode
     target_date = parse_recap_date(date_arg)
     return unless target_date
 
-    puts "📋 Starting Recap for Delegated Follow-ups"
+    puts "📋 Daily Recap Review"
     puts "List: #{working_list_title}"
     puts "Date: #{target_date.strftime('%A, %B %d, %Y')}"
     puts "=" * 60
     puts
 
     begin
-      # Step 1: Find all uncompleted tasks with due dates on or before the target date
-      puts "🔍 Gathering uncompleted tasks from #{target_date.strftime('%m/%d/%Y')} and earlier..."
-      all_tasks = @client.list_tasks(working_list_id, show_completed: false)
+      # Step 1: Find ALL tasks (completed and incomplete) with due date matching target_date
+      puts "🔍 Gathering all tasks for #{target_date.strftime('%m/%d/%Y')}..."
 
-      # Filter tasks that were due on or before the target date
+      # Get both completed and uncompleted tasks
+      uncompleted_tasks = @client.list_tasks(working_list_id, show_completed: false)
+      completed_tasks = @client.list_tasks(working_list_id, show_completed: true)
+      all_tasks = (uncompleted_tasks + completed_tasks).uniq { |t| t.id }
+
+      # Filter tasks with due date exactly matching target date
       target_tasks = all_tasks.select do |task|
         if task.due
           begin
             due_date = Time.parse(task.due).to_date
-            due_date <= target_date
+            due_date == target_date
           rescue
             false
           end
@@ -686,124 +690,165 @@ class InteractiveMode
       end
 
       if target_tasks.empty?
-        puts "📭 No uncompleted tasks found with due dates on or before #{target_date.strftime('%A, %B %d, %Y')}"
-        puts "Try checking a different date or use the grooming command for unscheduled tasks."
+        puts "📭 No tasks found for #{target_date.strftime('%A, %B %d, %Y')}"
+        puts "Try a different date or use the 'plan' command to schedule tasks."
         return
       end
 
-      puts "Found #{target_tasks.length} uncompleted task#{'s' if target_tasks.length != 1} due on/before #{target_date.strftime('%m/%d/%Y')}:"
+      # Step 2: Display all tasks for the day
+      puts "Found #{target_tasks.length} task#{'s' if target_tasks.length != 1} for this day:\n"
+
       target_tasks.each_with_index do |task, index|
-        status_icon = '○'
-        due_info = task.due ? " (Due: #{Time.parse(task.due).strftime('%m/%d')})" : ""
-        puts "  #{index + 1}. #{status_icon} #{task.title}#{due_info}"
+        status_icon = task.status == 'completed' ? '✓' : '○'
+        status_text = task.status == 'completed' ? 'Completed' : 'Incomplete'
+        priority_emoji = extract_priority_from_notes(task.notes)
+        priority_text = priority_emoji ? " #{priority_emoji}" : ""
+
+        puts "  #{index + 1}. [#{status_icon}] #{task.title}#{priority_text}"
+        puts "      Status: #{status_text}"
       end
       puts
 
-      # Step 2: Review each task for follow-up needs
-      puts "📝 FOLLOW-UP REVIEW: Checking each task for delegation follow-ups"
+      # Step 3: Ask which tasks need follow-ups (by number)
+      puts "📝 SELECT TASKS FOR FOLLOW-UP"
       puts "-" * 60
+      puts "Enter the numbers of tasks that need follow-ups (comma-separated)"
+      puts "Example: 1,3,5 or just press Enter to skip"
+      puts
 
+      unless $stdin.tty?
+        # In non-TTY mode, skip
+        puts "⏭️  Skipped (non-interactive mode)"
+        return
+      end
+
+      print "Task numbers for follow-up: "
+      input = $stdin.gets.chomp.strip
+
+      if input.empty?
+        puts "\n⏭️  No follow-ups requested"
+        return
+      end
+
+      # Parse the selected task numbers
+      selected_numbers = input.split(',').map { |n| n.strip.to_i }.select { |n| n > 0 && n <= target_tasks.length }
+
+      if selected_numbers.empty?
+        puts "\n⏭️  No valid task numbers provided"
+        return
+      end
+
+      # Step 4: Process each selected task
       follow_ups_created = 0
+      tasks_completed = 0
 
-      target_tasks.each_with_index do |task, index|
-        puts "\n🔍 Reviewing task #{index + 1} of #{target_tasks.length}:"
+      selected_numbers.each do |task_num|
+        task = target_tasks[task_num - 1]
+
+        puts "\n" + "=" * 60
+        puts "📋 Creating follow-up for task ##{task_num}:"
         puts "Title: #{task.title}"
-        puts "Due: #{task.due ? Time.parse(task.due).strftime('%Y-%m-%d %H:%M') : 'No due date'}"
-
+        puts "Status: #{task.status == 'completed' ? 'Completed' : 'Incomplete'}"
         if task.notes && !task.notes.empty?
-          puts "Notes: #{task.notes}"
+          puts "Notes: #{task.notes.split("\n").first}"  # Show first line
         end
         puts
 
-        # Ask if this task needs follow-up
-        unless $stdin.tty?
-          # In non-TTY mode, skip for demo
-          puts "⏭️  Skipped (non-interactive mode)"
+        # Collect follow-up information
+        print "What are you expecting to receive? (e.g., 'Report from client', 'Approval from manager'): "
+        expected_item = $stdin.gets.chomp.strip
+
+        if expected_item.empty?
+          puts "⏭️  Follow-up cancelled (no item specified)"
           next
         end
 
-        print "Is this task waiting for something from someone else? (y/N): "
-        needs_followup = $stdin.gets.chomp.strip.downcase
+        print "From whom are you expecting it? (e.g., 'John Smith', 'Client team', 'HR department'): "
+        from_whom = $stdin.gets.chomp.strip
 
-        if needs_followup == 'y' || needs_followup == 'yes'
-          # Collect follow-up information
-          print "What are you expecting to receive? (e.g., 'Report from client', 'Approval from manager'): "
-          expected_item = $stdin.gets.chomp.strip
+        if from_whom.empty?
+          puts "⏭️  Follow-up cancelled (no person/team specified)"
+          next
+        end
 
-          if expected_item.empty?
-            puts "⏭️  Follow-up cancelled (no item specified)"
-            next
+        # Create the follow-up task
+        begin
+          followup_title = "Follow up: #{expected_item}"
+
+          # Build comprehensive notes with link to original task
+          followup_notes = "📋 FOLLOW-UP TASK\n\n"
+          followup_notes += "Expecting: #{expected_item}\n"
+          followup_notes += "From: #{from_whom}\n"
+          followup_notes += "Original task due: #{task.due ? Time.parse(task.due).strftime('%Y-%m-%d') : 'No due date'}\n"
+          followup_notes += "Recap date: #{target_date.strftime('%Y-%m-%d')}\n\n"
+          followup_notes += "🔗 REFERENCE\n"
+          followup_notes += "Original task: \"#{task.title}\"\n"
+          followup_notes += "Task ID: #{task.id}\n"
+          followup_notes += "List: #{working_list_title}\n"
+
+          if task.notes && !task.notes.empty?
+            followup_notes += "\nOriginal notes:\n#{task.notes}"
           end
 
-          print "From whom are you expecting it? (e.g., 'John Smith', 'Client team', 'HR department'): "
-          from_whom = $stdin.gets.chomp.strip
-
-          if from_whom.empty?
-            puts "⏭️  Follow-up cancelled (no person/team specified)"
-            next
+          # Set follow-up for appropriate time based on urgency
+          if target_date == Date.today
+            # If recapping today, schedule follow-up for tomorrow
+            followup_due = (Date.today + 1)
+            followup_time = Time.new(followup_due.year, followup_due.month, followup_due.day, 9, 0, 0).utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+          else
+            # If recapping past dates, schedule for next Monday
+            followup_time = next_week_monday(9).utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
           end
 
           # Create the follow-up task
-          begin
-            followup_title = "Follow up: #{expected_item}"
+          new_task = @client.create_task(working_list_id, followup_title,
+                                       notes: followup_notes,
+                                       due: followup_time)
 
-            # Build comprehensive notes with link to original task
-            followup_notes = "📋 FOLLOW-UP TASK\n\n"
-            followup_notes += "Expecting: #{expected_item}\n"
-            followup_notes += "From: #{from_whom}\n"
-            followup_notes += "Original task due: #{task.due ? Time.parse(task.due).strftime('%Y-%m-%d') : 'No due date'}\n"
-            followup_notes += "Recap date: #{target_date.strftime('%Y-%m-%d')}\n\n"
-            followup_notes += "🔗 REFERENCE\n"
-            followup_notes += "Original task: \"#{task.title}\"\n"
-            followup_notes += "Task ID: #{task.id}\n"
-            followup_notes += "List: #{working_list_title}\n"
+          puts "\n✅ Follow-up task created:"
+          puts "   Title: #{followup_title}"
+          puts "   Due: #{Time.parse(followup_time).strftime('%A, %B %d, %Y at %H:%M')}"
+          puts "   Expecting: #{expected_item} from #{from_whom}"
+          puts "   ID: #{new_task.id}"
 
-            if task.notes && !task.notes.empty?
-              followup_notes += "\nOriginal notes:\n#{task.notes}"
-            end
+          follow_ups_created += 1
 
-            # Set follow-up for appropriate time based on urgency
-            if target_date == Date.today
-              # If recapping today, schedule follow-up for tomorrow
-              followup_due = (Date.today + 1)
-              followup_time = Time.new(followup_due.year, followup_due.month, followup_due.day, 9, 0, 0).utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+          # Step 5: Ask if original task should be marked as complete
+          if task.status != 'completed'
+            puts
+            print "Mark original task '#{task.title}' as complete? (y/N): "
+            mark_complete = $stdin.gets.chomp.strip.downcase
+
+            if mark_complete == 'y' || mark_complete == 'yes'
+              begin
+                @client.complete_task(working_list_id, task.id)
+                puts "✅ Original task marked as complete"
+                tasks_completed += 1
+              rescue => complete_error
+                puts "❌ Error completing task: #{complete_error.message}"
+              end
             else
-              # If recapping past dates, schedule for next Monday
-              followup_time = next_week_monday(9).utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+              puts "⏭️  Original task remains incomplete"
             end
-
-            # Create the follow-up task
-            new_task = @client.create_task(working_list_id, followup_title,
-                                         notes: followup_notes,
-                                         due: followup_time)
-
-            puts "✅ Follow-up task created:"
-            puts "   Title: #{followup_title}"
-            puts "   Due: #{Time.parse(followup_time).strftime('%A, %B %d, %Y at %H:%M')}"
-            puts "   Expecting: #{expected_item} from #{from_whom}"
-            puts "   ID: #{new_task.id}"
-
-            follow_ups_created += 1
-
-          rescue => e
-            puts "❌ Error creating follow-up task: #{e.message}"
+          else
+            puts "ℹ️  Original task already marked as complete"
           end
-        else
-          puts "⏭️  No follow-up needed for this task"
-        end
 
-        puts
+        rescue => e
+          puts "❌ Error creating follow-up task: #{e.message}"
+        end
       end
 
       # Summary
+      puts "\n" + "=" * 60
       puts "🎉 Recap completed!"
-      puts "Reviewed #{target_tasks.length} uncompleted task#{'s' if target_tasks.length != 1}"
-      puts "Created #{follow_ups_created} follow-up task#{'s' if follow_ups_created != 1}"
+      puts "Selected tasks: #{selected_numbers.length}"
+      puts "Follow-ups created: #{follow_ups_created}"
+      puts "Tasks marked complete: #{tasks_completed}"
 
       if follow_ups_created > 0
         puts "\n💡 Tips for managing follow-ups:"
         puts "• Use 'search follow' to find all follow-up tasks"
-        puts "• Mark original tasks as complete once follow-ups are resolved"
         puts "• Review follow-ups regularly to stay on top of delegated work"
       end
       puts
@@ -1489,7 +1534,7 @@ class InteractiveMode
       puts "  review <task_id>       - Review and classify task with priority/department"
       puts "  agenda                 - Category-based time-blocking with 2-minute rule filtering"
       puts "  grooming               - GTD workflow: review unclassified tasks then schedule all overdue/unscheduled tasks"
-      puts "  recap [date]           - Review uncompleted tasks and create follow-up tasks for delegated items (today/yesterday/YYYY-MM-DD)"
+      puts "  recap [date]           - Review day's tasks (completed/incomplete), select tasks by number for follow-ups (today/yesterday/YYYY-MM-DD)"
     else
       puts "List context commands (available when in a list context):"
       puts "  tasks, list [--completed] [--limit N] - Show tasks in current list"
@@ -1503,7 +1548,7 @@ class InteractiveMode
       puts "  review <task_id>       - Review and classify task with priority/department"
       puts "  agenda                 - Category-based time-blocking with 2-minute rule filtering"
       puts "  grooming               - GTD workflow: review unclassified tasks then schedule all overdue/unscheduled tasks"
-      puts "  recap [date]           - Review uncompleted tasks and create follow-up tasks for delegated items (today/yesterday/YYYY-MM-DD)"
+      puts "  recap [date]           - Review day's tasks (completed/incomplete), select tasks by number for follow-ups (today/yesterday/YYYY-MM-DD)"
     end
     puts
   end
