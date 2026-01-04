@@ -587,7 +587,13 @@ class GoogleTasksClient
 
   def complete_task(list_id, task_id)
     ensure_authenticated
-    update_task(list_id, task_id, status: 'completed')
+    # Get current task to preserve all properties when marking complete
+    current_task = get_task(list_id, task_id)
+    update_task(list_id, task_id,
+                title: current_task.title,
+                notes: current_task.notes,
+                due: current_task.due,
+                status: 'completed')
   end
 
   def logout

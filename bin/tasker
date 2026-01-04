@@ -186,6 +186,14 @@ class TaskerCLI < Thor
     puts "Error: #{e.message}"
   end
 
+  desc 'recap LIST_ID [DATE]', 'Review uncompleted tasks and create follow-up tasks for delegated items'
+  def recap(list_id, date_arg = nil)
+    interactive_mode = InteractiveMode.new(client)
+    interactive_mode.recap_workflow(list_id, date_arg)
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
   private
 
   def client

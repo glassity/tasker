@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my
+  namespace: production
+spec:
+  containers:
+  - env:
+    - name: PGPASSFILE
+      value: /etc/pgpass-volume/.pgpass
+    image: 997234647782.dkr.ecr.eu-west-1.amazonaws.com/db-dump:latest
+    command: ["/bin/sh"]
+    args: ["-c", "sleep 100000"] 
+    imagePullPolicy: Always
+    name: db-dump
+    
+    resources: {}
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /etc/pgpass-volume
+      name: pgpass-volume
+      readOnly: true
+    - mountPath: /etc/gcloud-volume
+      name: gcloud-volume
+      readOnly: true
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-m97ps
+      readOnly: true
+  volumes:
+  - name: pgpass-volume
+    secret:
+      defaultMode: 384
+      secretName: db-dump-pgpass
+  - name: gcloud-volume
+    secret:
+      defaultMode: 420
+      secretName: dump-to-looker-sa-key
+  - name: kube-api-access-m97ps
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          expirationSeconds: 3607
+          path: token
+      - configMap:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          name: kube-root-ca.crt
+      - downwardAPI:
+          items:
+          - fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+            path: namespace
