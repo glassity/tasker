@@ -186,6 +186,14 @@ class TaskerCLI < Thor
     puts "Error: #{e.message}"
   end
 
+  desc 'recap LIST_ID [DATE]', 'Review uncompleted tasks and create follow-up tasks for delegated items'
+  def recap(list_id, date_arg = nil)
+    interactive_mode = InteractiveMode.new(client)
+    interactive_mode.recap_workflow(list_id, date_arg)
+  rescue => e
+    puts "Error: #{e.message}"
+  end
+
   private
 
   def client
@@ -241,4 +249,20 @@ class TaskerCLI < Thor
   end
 end
 
-TaskerCLI.start(ARGV)
+# If no arguments provided, start interactive mode
+if ARGV.empty?
+  begin
+    require_relative '../lib/google_calendar_client'
+    client = GoogleTasksClient.new('oauth_credentials.json')
+    calendar_client = GoogleCalendarClient.new('oauth_credentials.json')
+    interactive_mode = InteractiveMode.new(client, calendar_client)
+    interactive_mode.start
+  rescue => e
+    puts "Interactive mode failed: #{e.message}"
+    puts "Please ensure you're running this in a proper terminal."
+    puts "Use 'tasker interactive --demo' to see a demonstration."
+    puts e.backtrace.first(3) if ENV['DEBUG']
+  end
+else
+  TaskerCLI.start(ARGV)
+end

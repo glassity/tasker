@@ -17,27 +17,29 @@ This is a Ruby-based Google Tasks client that implements Getting Things Done (GT
 - `search <text>` - Search uncompleted tasks containing text
 - `plan <task_id>` - Quickly schedule task (today, tomorrow, next week, etc.)
 - `review <task_id>` - Review and classify task with priority/department
-- `agenda` - **NEW**: Time-block today's tasks in 30-min slots starting from now (ordered by priority)
+- `agenda` - **NEW**: Category-based time-blocking with 2-minute rule filtering
 - `grooming` - **NEW**: GTD workflow for reviewing and scheduling tasks
+- `recap [date]` - **NEW**: Review day's tasks (completed/incomplete), select by number for follow-ups
 
 ### Console Commands
 - `./bin/tasker lists`
 - `./bin/tasker tasks LIST_ID`
-- `./bin/tasker agenda LIST_ID` - **NEW**: Time-block today's tasks in 30-minute slots
+- `./bin/tasker agenda LIST_ID` - **NEW**: Category-based time-blocking with batched calendar events
 - `./bin/tasker grooming LIST_ID` - **NEW**: GTD grooming workflow
+- `./bin/tasker recap LIST_ID [date]` - **NEW**: Review day's tasks, select by number for follow-ups
 
-## NEW: Hybrid Agenda Time-Blocking Feature
+## NEW: Category-Based Agenda Time-Blocking Feature
 
 ### What it does
-The `agenda` command implements a hybrid GTD approach combining Google Tasks + Google Calendar:
+The `agenda` command implements a category-based GTD approach combining Google Tasks + Google Calendar:
 
 1. **Finds today's tasks**: All uncompleted tasks with due date = today
-2. **Priority sorting**: Automatically orders tasks by priority (🔥Hot → 🟢Must → 🟠Nice → 🔴NotNow → No priority)  
-3. **Hybrid scheduling**: 
-   - 📋 **Google Tasks**: Keeps tasks clean with today's due date (no time pollution)
-   - 📅 **Google Calendar**: Creates time-blocked events for precise scheduling
-4. **Interactive time-blocking**: User confirms each 30-minute time slot
-5. **Dual-system agenda**: Tasks for completion tracking, calendar for time awareness
+2. **Groups by category and priority**: Organizes tasks by department (🧩Product, 📈Business, etc.) and priority within each category
+3. **2-minute rule filtering**: For each task, asks if it takes less than 2 minutes; if yes, it's excluded from time-blocking
+4. **Batches tasks by category**: Creates single calendar events for all tasks in each category
+5. **30-minute average per task**: Calculates total time block duration (e.g., 3 tasks = 90 minutes)
+6. **User-confirmed scheduling**: User specifies the start time for each category block
+7. **Efficient context switching**: Groups related tasks together to minimize cognitive overhead
 
 ### Usage Examples
 
@@ -54,57 +56,105 @@ agenda
 
 ### Expected Output Flow
 ```
-📅 Starting Daily Agenda Time-Blocking
+📅 Starting Category-Based Agenda Planning
 List: My Task List
 ============================================================
 
 📋 Gathering today's tasks...
-Found 4 tasks for today:
-  1. ○ Review quarterly report
-  2. 🔥Hot Prepare presentation
-  3. 🟢Must Call client meeting
-  4. 🟠Nice Update documentation
+Found 6 tasks for today.
 
-📊 Tasks ordered by priority:
-  1. 🔥Hot Prepare presentation
-  2. 🟢Must Call client meeting  
-  3. ○ Review quarterly report
-  4. 🟠Nice Update documentation
+📊 Tasks grouped by category and priority:
 
-⏰ Scheduling tasks in 30-minute time blocks starting from 14:30
-------------------------------------------------------------
+🧩Product:
+  🔥Hot:
+    1. Prepare presentation
+    2. Fix critical bug
+  🟢Must:
+    3. Review code PR
 
-📋 Time Slot 1: 14:30-15:00
-Task: 🔥Hot Prepare presentation
-Classification: 🔥Hot 🧩Product
-Schedule this task for 14:30-15:00? (y/n/s=skip): y
-Creating calendar event for time slot...
-✅ Scheduled: Prepare presentation
-   📋 Google Tasks: Due today
-   📅 Google Calendar: 14:30-15:00
+📈Business:
+  🟢Must:
+    4. Call client meeting
+  🟠Nice:
+    5. Update quarterly report
 
-📋 Time Slot 2: 15:00-15:30
-Task: 🟢Must Call client meeting
-Schedule this task for 15:00-15:30? (y/n/s=skip): y
-Creating calendar event for time slot...
-✅ Scheduled: Call client meeting
-   📋 Google Tasks: Due today  
-   📅 Google Calendar: 15:00-15:30
+No Category:
+  No Priority:
+    6. Check emails
+
+============================================================
+🏷️  Processing Category: 🧩Product
+============================================================
+
+📋 Task 1 of 3: 🔥Hot Prepare presentation
+Does this take less than 2 minutes? (y/N): n
+✅ Added to scheduling queue
+
+📋 Task 2 of 3: 🔥Hot Fix critical bug
+Does this take less than 2 minutes? (y/N): n
+✅ Added to scheduling queue
+
+📋 Task 3 of 3: 🟢Must Review code PR
+Does this take less than 2 minutes? (y/N): y
+⏭️  Task takes less than 2 minutes - ignoring for time-blocking
+
+📅 Time Block Summary for 🧩Product:
+   Tasks to schedule: 2
+   Total duration: 1h 0min (30 min per task)
+
+Schedule this block starting at what time? (HH:MM or Enter for 14:30): 14:30
+
+📅 Creating calendar event:
+   Title: 2 tasks for 🧩Product
+   Time: 14:30 - 15:30
+   Duration: 1h 0min
+✅ Calendar event created successfully!
+
+============================================================
+🏷️  Processing Category: 📈Business
+============================================================
+
+📋 Task 1 of 2: 🟢Must Call client meeting
+Does this take less than 2 minutes? (y/N): n
+✅ Added to scheduling queue
+
+📋 Task 2 of 2: 🟠Nice Update quarterly report
+Does this take less than 2 minutes? (y/N): n
+✅ Added to scheduling queue
+
+📅 Time Block Summary for 📈Business:
+   Tasks to schedule: 2
+   Total duration: 1h 0min (30 min per task)
+
+Schedule this block starting at what time? (HH:MM or Enter for 15:30): 16:00
+
+📅 Creating calendar event:
+   Title: 2 tasks for 📈Business
+   Time: 16:00 - 17:00
+   Duration: 1h 0min
+✅ Calendar event created successfully!
 
 ================================================================================
-📅 TODAY'S HYBRID AGENDA SUMMARY
+📅 TODAY'S CATEGORY-BASED AGENDA SUMMARY
 ================================================================================
-📋 Google Tasks: All scheduled tasks are due today
-📅 Google Calendar: Time-blocked schedule below
 
-14:30-15:00 | 🔥Hot Prepare presentation 📅
-15:00-15:30 | 🟢Must Call client meeting 📅
+14:30-15:30 | 2 tasks for 🧩Product (1h 0min)
+16:00-17:00 | 2 tasks for 📈Business (1h 0min)
 
-🎯 Hybrid approach activated! 2 tasks scheduled.
-📋 Tasks remain in Google Tasks (clean, no time pollution)
-📅 Calendar events created for precise time-blocking
-💡 Tip: Use your calendar for time awareness, tasks for completion tracking
+🎯 Category-based agenda complete! 2 time blocks created for 4 tasks.
+📅 Check your Google Calendar for the scheduled blocks
+💡 Tip: Each block groups related tasks by category for efficient context switching
 ```
+
+### Calendar Event Details
+Each category block includes:
+- **Title**: "X tasks for [Category]" (e.g., "2 tasks for 🧩Product")
+- **Description**:
+  - Category name
+  - Numbered list of all tasks with their priorities
+  - Total estimated time
+  - "Created by GTD Task Manager" footer
+- **Color**: Green (color_id = 10) for easy identification
 
 ## NEW: Grooming Workflow Feature
 
@@ -178,6 +228,138 @@ Current due date: (none)
 
 🎉 GTD Grooming completed!
 All 5 tasks have been processed.
+```
+
+## NEW: Recap Feature for Daily Task Review
+
+### What it does
+The `recap` command implements a daily task review workflow:
+
+1. **Shows all tasks for a specific day**: Displays both completed and incomplete tasks with due date matching the target date
+2. **Selective follow-up creation**: User selects tasks by number that need follow-ups (comma-separated list)
+3. **Creates follow-up tasks**: For selected items, creates new tasks with:
+   - What you're expecting to receive
+   - From whom you're expecting it
+   - Link back to the original task
+   - Automatically scheduled (tomorrow for today's recap, next Monday for past dates)
+4. **Optional task completion**: After creating each follow-up, asks if the original task should be marked as complete
+
+### Usage Examples
+
+**Interactive Mode:**
+```bash
+# After selecting a list with 'use <list_name>'
+recap                    # Review today's tasks
+recap yesterday         # Review yesterday's tasks
+recap 2025-01-15       # Review specific date's tasks
+```
+
+**Console Mode:**
+```bash
+./bin/tasker recap LIST_ID              # Today's tasks
+./bin/tasker recap LIST_ID yesterday    # Yesterday's tasks
+./bin/tasker recap LIST_ID 2025-01-15  # Specific date's tasks
+```
+
+### Expected Output Flow
+```
+📋 Daily Recap Review
+List: My Task List
+Date: Monday, September 16, 2025
+============================================================
+
+🔍 Gathering all tasks for 09/16/2025...
+Found 5 tasks for this day:
+
+  1. [✓] Complete project documentation 🟢Must
+      Status: Completed
+  2. [○] Wait for proposal feedback 🟢Must
+      Status: Incomplete
+  3. [○] Follow up on budget request 🟠Nice
+      Status: Incomplete
+  4. [✓] Team standup meeting
+      Status: Completed
+  5. [○] Review contract draft 🔥Hot
+      Status: Incomplete
+
+📝 SELECT TASKS FOR FOLLOW-UP
+------------------------------------------------------------
+Enter the numbers of tasks that need follow-ups (comma-separated)
+Example: 1,3,5 or just press Enter to skip
+
+Task numbers for follow-up: 2,3
+
+============================================================
+📋 Creating follow-up for task #2:
+Title: Wait for proposal feedback
+Status: Incomplete
+Notes: 🟢Must 📈Business
+
+What are you expecting to receive? (e.g., 'Report from client', 'Approval from manager'): Proposal feedback and decision
+From whom are you expecting it? (e.g., 'John Smith', 'Client team', 'HR department'): Client ABC Corp
+
+✅ Follow-up task created:
+   Title: Follow up: Proposal feedback and decision
+   Due: Tuesday, September 17, 2025 at 09:00
+   Expecting: Proposal feedback and decision from Client ABC Corp
+   ID: xyz123
+
+Mark original task 'Wait for proposal feedback' as complete? (y/N): y
+✅ Original task marked as complete
+
+============================================================
+📋 Creating follow-up for task #3:
+Title: Follow up on budget request
+Status: Incomplete
+
+What are you expecting to receive?: Budget approval
+From whom are you expecting it?: Finance team
+
+✅ Follow-up task created:
+   Title: Follow up: Budget approval
+   Due: Tuesday, September 17, 2025 at 09:00
+   Expecting: Budget approval from Finance team
+   ID: xyz124
+
+Mark original task 'Follow up on budget request' as complete? (y/N): n
+⏭️  Original task remains incomplete
+
+============================================================
+🎉 Recap completed!
+Selected tasks: 2
+Follow-ups created: 2
+Tasks marked complete: 1
+
+💡 Tips for managing follow-ups:
+• Use 'search follow' to find all follow-up tasks
+• Review follow-ups regularly to stay on top of delegated work
+```
+
+### Follow-up Task Structure
+Each follow-up task includes comprehensive notes with:
+- What you're expecting
+- From whom
+- Original task due date
+- Recap date
+- Link to original task (ID and title)
+- Full context from original task notes
+
+Example follow-up task notes:
+```
+📋 FOLLOW-UP TASK
+
+Expecting: Proposal feedback and decision
+From: Client ABC Corp
+Original task due: 2025-09-15
+Recap date: 2025-09-16
+
+🔗 REFERENCE
+Original task: "Wait for proposal feedback"
+Task ID: abc456
+List: My Task List
+
+Original notes:
+🟢Must 📈Business
 ```
 
 ## Authentication Requirements
